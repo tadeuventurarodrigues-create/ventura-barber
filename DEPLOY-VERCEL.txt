@@ -1,0 +1,8 @@
+Projeto ajustado para remover a rota /barber e corrigir a tipagem do painel /shop.
+
+Antes de subir na Vercel:
+1. Importe o projeto.
+2. Configure na Vercel as mesmas variáveis que estão no arquivo .env.local.
+3. Build command: npm run build
+4. Install command: npm install
+5. Output: padrão do Next.js

@@ -1,0 +1,23 @@
+Arquivos alterados nesta versão:
+- app/api/bookings/route.ts
+- app/api/available-times/route.ts
+- app/api/webhook/route.ts
+- app/api/admin/setup-shop/route.ts
+- app/api/admin/working-hours/route.ts
+- app/api/admin/barbershops/route.ts
+- components/admin-single-form.tsx
+
+O que foi ajustado:
+- normalização do WhatsApp do cliente no agendamento
+- confirmação para o cliente ao agendar
+- fidelidade corrigida
+- horários disponíveis respeitando pausa de almoço
+- painel admin com pausa de almoço nos horários do barbeiro
+- webhook com agendamentos hoje/amanhã, cancelar qualquer dia e remarcar
+- aviso automático ao cliente em cancelamento e remarcação
+- criação de barbearia com slug único automático e upsert da fidelidade
+
+Observação:
+- use o schema.sql atual do projeto
+- copie .env.example para .env.local
+- mantenha EVOLUTION_API_URL local, se Next e Evolution estiverem na mesma máquina

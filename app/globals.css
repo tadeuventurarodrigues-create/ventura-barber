@@ -1,0 +1,29 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg: #0a0a0a;
+  --panel: #121212;
+  --soft: #1c1c1c;
+  --line: rgba(255,255,255,.08);
+  --text: #f7f7f7;
+  --muted: rgba(255,255,255,.68);
+  --gold: #c49b63;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; background: var(--bg); color: var(--text); font-family: Arial, Helvetica, sans-serif; }
+a { color: inherit; text-decoration: none; }
+input, select, textarea, button { font: inherit; }
+body { min-height: 100vh; }
+
+.panel { background: linear-gradient(180deg, rgba(255,255,255,.05), rgba(255,255,255,.03)); border: 1px solid var(--line); border-radius: 24px; }
+.field { width: 100%; border-radius: 16px; border: 1px solid var(--line); background: rgba(0,0,0,.22); color: white; padding: 12px 14px; }
+.field::placeholder { color: rgba(255,255,255,.42); }
+.btn { border: 0; cursor: pointer; border-radius: 16px; padding: 12px 16px; font-weight: 700; }
+.btn-primary { background: var(--gold); color: #141414; }
+.btn-dark { background: #202020; color: white; border: 1px solid var(--line); }
+.badge { display:inline-flex; align-items:center; border-radius:999px; padding:6px 10px; font-size:12px; border: 1px solid var(--line); background: rgba(255,255,255,.04); }
+.grid-cards { display:grid; gap:16px; }
+@media (min-width: 900px){ .grid-cards{ grid-template-columns: repeat(3, minmax(0, 1fr)); } }

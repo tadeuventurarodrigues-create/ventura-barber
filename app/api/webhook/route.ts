@@ -101,6 +101,13 @@ function minutesToTime(minutes: number) {
   return `${h}:${m}`;
 }
 
+function getRelationItem<T = any>(value: any): T | null {
+  if (Array.isArray(value)) {
+    return value[0] || null;
+  }
+  return value || null;
+}
+
 async function findProfessionalByWhatsapp(phone: string) {
   const normalized = normalizePhone(phone);
   if (!normalized) return null;
@@ -156,7 +163,8 @@ async function getBookingsText(professionalId: string, bookingDate: string, titl
   }
 
   const lines = bookings.map((booking: any) => {
-    const serviceName = booking?.services?.name || 'Serviço';
+    const service = getRelationItem<{ name?: string }>(booking?.services);
+    const serviceName = service?.name || 'Serviço';
     const number = booking?.daily_order_number ? `#${booking.daily_order_number} • ` : '';
     return `${number}${booking.customer_name} — ${booking.start_time} — ${serviceName}`;
   });
@@ -213,6 +221,18 @@ async function cancelBookingByCustomerWhatsapp(phone: string) {
     return { ok: false, reason: 'not-found' as const };
   }
 
+  const customer = getRelationItem<{ name?: string; whatsapp_number?: string; phone?: string }>(booking?.customer);
+  const professional = getRelationItem<{
+    name?: string;
+    whatsapp_number?: string;
+    evolution_enabled?: boolean;
+    evolution_api_url?: string;
+    evolution_instance?: string;
+    evolution_api_key?: string;
+  }>(booking?.professional);
+  const service = getRelationItem<{ name?: string }>(booking?.service);
+  const barbershop = getRelationItem<{ name?: string; whatsapp_number?: string }>(booking?.barbershop);
+
   const { error: updateError } = await supabaseAdmin
     .from('bookings')
     .update({
@@ -228,24 +248,24 @@ async function cancelBookingByCustomerWhatsapp(phone: string) {
   }
 
   const customerPhone = normalizePhone(
-    booking?.customer?.whatsapp_number || booking?.customer?.phone || booking?.customer_whatsapp || ''
+    customer?.whatsapp_number || customer?.phone || booking?.customer_whatsapp || ''
   );
 
   const barberPhone = normalizePhone(
-    booking?.professional?.whatsapp_number || booking?.barbershop?.whatsapp_number || ''
+    professional?.whatsapp_number || barbershop?.whatsapp_number || ''
   );
 
-  const evolutionConfig = getEvolutionConfigFromProfessional(booking?.professional);
+  const evolutionConfig = getEvolutionConfigFromProfessional(professional);
 
   if (customerPhone) {
     await sendWhatsAppMessage(
       customerPhone,
-      `Olá, ${booking?.customer?.name || booking?.customer_name || 'cliente'}.
+      `Olá, ${customer?.name || booking?.customer_name || 'cliente'}.
 
-Seu agendamento em ${booking?.barbershop?.name || 'nossa barbearia'} foi cancelado com sucesso.
+Seu agendamento em ${barbershop?.name || 'nossa barbearia'} foi cancelado com sucesso.
 
-Serviço: ${booking?.service?.name || 'Serviço'}
-Profissional: ${booking?.professional?.name || 'Barbeiro'}
+Serviço: ${service?.name || 'Serviço'}
+Profissional: ${professional?.name || 'Barbeiro'}
 Data: ${formatDateBR(booking?.booking_date)}
 Hora: ${booking?.start_time}
 
@@ -260,8 +280,8 @@ Seu horário foi liberado no sistema.`,
         barberPhone,
         `📌 Cancelamento automático
 
-Cliente: ${booking?.customer?.name || booking?.customer_name || 'Cliente'}
-Serviço: ${booking?.service?.name || 'Serviço'}
+Cliente: ${customer?.name || booking?.customer_name || 'Cliente'}
+Serviço: ${service?.name || 'Serviço'}
 Data: ${formatDateBR(booking?.booking_date)}
 Hora: ${booking?.start_time}
 
@@ -445,15 +465,19 @@ Use:
         evolutionConfig
       );
 
+      const customer = getRelationItem<{ name?: string; whatsapp_number?: string; phone?: string }>(booking?.customers);
+      const service = getRelationItem<{ name?: string }>(booking?.services);
+
       const customerPhone = normalizePhone(
-        booking?.customers?.whatsapp_number || booking?.customers?.phone || booking?.customer_whatsapp || ''
+        customer?.whatsapp_number || customer?.phone || booking?.customer_whatsapp || ''
       );
+
       if (customerPhone) {
         await sendWhatsAppMessage(
           customerPhone,
-          `Olá, ${booking?.customers?.name || booking?.customer_name || 'cliente'}.
+          `Olá, ${customer?.name || booking?.customer_name || 'cliente'}.
 
-Seu agendamento de ${booking?.services?.name || 'serviço'} em ${formatDateBR(targetDate)} às ${booking.start_time} foi cancelado pela barbearia.
+Seu agendamento de ${service?.name || 'serviço'} em ${formatDateBR(targetDate)} às ${booking.start_time} foi cancelado pela barbearia.
 
 Se quiser, entre em contato para remarcar.`,
           evolutionConfig
@@ -506,6 +530,7 @@ Exemplo: remarcar 1 para 2026-04-12 14:00`,
         oldDate,
         bookingNumber
       );
+
       if (bookingError || !booking) {
         await sendWhatsAppMessage(
           senderNumber,
@@ -524,7 +549,8 @@ Exemplo: remarcar 1 para 2026-04-12 14:00`,
         return NextResponse.json({ ok: true, action: 'reschedule-already-cancelled' });
       }
 
-      const service = booking.services;
+      const service = getRelationItem<{ name?: string; duration_minutes?: number }>(booking?.services);
+
       if (!service) {
         await sendWhatsAppMessage(senderNumber, 'Serviço do agendamento não encontrado.', evolutionConfig);
         return NextResponse.json({ ok: true, action: 'reschedule-no-service' });
@@ -619,13 +645,16 @@ Para: ${formatDateBR(newDate)} ${newStartTime}`,
         evolutionConfig
       );
 
+      const customer = getRelationItem<{ name?: string; whatsapp_number?: string; phone?: string }>(booking?.customers);
+
       const customerPhone = normalizePhone(
-        booking?.customers?.whatsapp_number || booking?.customers?.phone || booking?.customer_whatsapp || ''
+        customer?.whatsapp_number || customer?.phone || booking?.customer_whatsapp || ''
       );
+
       if (customerPhone) {
         await sendWhatsAppMessage(
           customerPhone,
-          `Olá, ${booking?.customers?.name || booking?.customer_name || 'cliente'}.
+          `Olá, ${customer?.name || booking?.customer_name || 'cliente'}.
 
 Seu agendamento de ${service.name || 'serviço'} foi remarcado.
 

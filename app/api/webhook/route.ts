@@ -163,8 +163,7 @@ async function getBookingsText(professionalId: string, bookingDate: string, titl
 
   return `${title} (${formatDateBR(bookingDate)})
 
-${lines.join('
-')}`;
+${lines.join('\n')}`;
 }
 
 async function findNextBookingByCustomerWhatsapp(phone: string) {
@@ -363,7 +362,12 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: true, action: 'bookings-today' });
     }
 
-    if (text === 'agendamentos amanhã' || text === 'agendamentos amanha' || text === 'agenda amanhã' || text === 'agenda amanha') {
+    if (
+      text === 'agendamentos amanhã' ||
+      text === 'agendamentos amanha' ||
+      text === 'agenda amanhã' ||
+      text === 'agenda amanha'
+    ) {
       const tomorrow = addDaysIso(getTodayIso(), 1);
       const replyText = await getBookingsText(professional.id, tomorrow, 'Agendamentos de amanhã');
       await sendWhatsAppMessage(senderNumber, replyText, evolutionConfig);
@@ -378,10 +382,10 @@ export async function POST(req: Request) {
       if (!number || Number.isNaN(number)) {
         await sendWhatsAppMessage(
           senderNumber,
-          'Use:
+          `Use:
 - cancelar 1
 - cancelar 1 amanhã
-- cancelar 1 2026-04-10',
+- cancelar 1 2026-04-10`,
           evolutionConfig
         );
         return NextResponse.json({ ok: true, action: 'cancel-help' });
@@ -391,12 +395,12 @@ export async function POST(req: Request) {
       if (!targetDate) {
         await sendWhatsAppMessage(
           senderNumber,
-          'Data inválida.
+          `Data inválida.
 
 Use:
 - cancelar 1
 - cancelar 1 amanhã
-- cancelar 1 2026-04-10',
+- cancelar 1 2026-04-10`,
           evolutionConfig
         );
         return NextResponse.json({ ok: true, action: 'cancel-invalid-date' });
@@ -460,15 +464,17 @@ Se quiser, entre em contato para remarcar.`,
     }
 
     if (text.startsWith('remarcar')) {
-      const match = text.match(/^remarcar\s+(\d+)(?:\s+(hoje|amanha|amanhã|\d{4}-\d{2}-\d{2}))?\s+para\s+(\d{4}-\d{2}-\d{2})\s+(\d{2}:\d{2})$/);
+      const match = text.match(
+        /^remarcar\s+(\d+)(?:\s+(hoje|amanha|amanhã|\d{4}-\d{2}-\d{2}))?\s+para\s+(\d{4}-\d{2}-\d{2})\s+(\d{2}:\d{2})$/
+      );
 
       if (!match) {
         await sendWhatsAppMessage(
           senderNumber,
-          'Use:
+          `Use:
 - remarcar 1 para 2026-04-12 14:00
 - remarcar 1 amanhã para 2026-04-12 14:00
-- remarcar 1 2026-04-10 para 2026-04-12 14:00',
+- remarcar 1 2026-04-10 para 2026-04-12 14:00`,
           evolutionConfig
         );
         return NextResponse.json({ ok: true, action: 'reschedule-help' });
@@ -488,14 +494,18 @@ Se quiser, entre em contato para remarcar.`,
       if (!isValidDateString(newDate) || !isValidTimeString(newStartTime)) {
         await sendWhatsAppMessage(
           senderNumber,
-          'Nova data ou hora inválida.
-Exemplo: remarcar 1 para 2026-04-12 14:00',
+          `Nova data ou hora inválida.
+Exemplo: remarcar 1 para 2026-04-12 14:00`,
           evolutionConfig
         );
         return NextResponse.json({ ok: true, action: 'reschedule-invalid-new-date' });
       }
 
-      const { data: booking, error: bookingError } = await findBookingByDailyNumber(professional.id, oldDate, bookingNumber);
+      const { data: booking, error: bookingError } = await findBookingByDailyNumber(
+        professional.id,
+        oldDate,
+        bookingNumber
+      );
       if (bookingError || !booking) {
         await sendWhatsAppMessage(
           senderNumber,

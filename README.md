@@ -18,7 +18,7 @@ O **Ventura Barber** é uma plataforma SaaS para barbearias que permite:
 - Supabase
 - PostgreSQL
 - Evolution API
-- Vercel
+- Vercel i
 
 ## 🌐 Funcionalidades
 

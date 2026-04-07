@@ -1,0 +1,16 @@
+{
+  "crons": [
+    {
+      "path": "/api/jobs/send-booking-reminders",
+      "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/jobs/send-final-booking-reminders",
+      "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/jobs/check-late-bookings",
+      "schedule": "*/5 * * * *"
+    }
+  ]
+}

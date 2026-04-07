@@ -101,7 +101,7 @@ export async function GET(req: Request) {
         status,
         customer_name,
         customer_whatsapp,
-        reminder_sent_at,
+        late_reminder_sent_at,
         service:services(
           id,
           name
@@ -123,7 +123,7 @@ export async function GET(req: Request) {
       `)
       .eq('booking_date', todayIso)
       .eq('status', 'confirmed')
-      .is('reminder_sent_at', null)
+      .is('late_reminder_sent_at', null)
       .order('start_time', { ascending: true });
 
     if (error) {
@@ -142,16 +142,16 @@ export async function GET(req: Request) {
 
       const bookingDateTime = combineDateTime(booking.booking_date, booking.start_time);
       const diffMinutes = Math.round(
-        (bookingDateTime.getTime() - now.getTime()) / 60000
+        (now.getTime() - bookingDateTime.getTime()) / 60000
       );
 
-      // envia quando faltar 60 min ou menos, sem passar da hora
-      if (diffMinutes > 60 || diffMinutes < 0) {
+      // envia aviso quando já tiver 10 min de atraso ou mais
+      if (diffMinutes < 10) {
         skipped++;
         debug.push({
           bookingId: booking.id,
           customer: booking.customer_name,
-          reason: 'fora_da_janela_1h',
+          reason: 'ainda_nao_atrasou_10min',
           diffMinutes,
           start_time: booking.start_time,
         });
@@ -175,17 +175,15 @@ export async function GET(req: Request) {
 
       const message = `Olá, ${booking.customer_name || 'cliente'}.
 
-Falta cerca de 1 hora para seu agendamento em ${barbershop?.name || 'nossa barbearia'}.
+Seu horário em ${barbershop?.name || 'nossa barbearia'} já passou do horário previsto.
 
 Serviço: ${service?.name || 'Serviço'}
 Profissional: ${professional?.name || 'Barbeiro'}
 Data: ${formatDateBR(booking.booking_date)}
 Hora: ${booking.start_time}
 
-Se deseja cancelar, responda:
-cancelar
-
-Se deseja remarcar, responda:
+Se ainda for comparecer, responda esta mensagem.
+Se quiser remarcar, responda:
 remarcar`;
 
       try {
@@ -194,7 +192,7 @@ remarcar`;
         await supabaseAdmin
           .from('bookings')
           .update({
-            reminder_sent_at: new Date().toISOString(),
+            late_reminder_sent_at: new Date().toISOString(),
           })
           .eq('id', booking.id);
 
@@ -208,7 +206,7 @@ remarcar`;
           phone: customerPhone,
         });
       } catch (err) {
-        console.error('Erro ao enviar lembrete de 1 hora:', err);
+        console.error('Erro ao enviar aviso de atraso:', err);
         debug.push({
           bookingId: booking.id,
           customer: booking.customer_name,
@@ -220,14 +218,14 @@ remarcar`;
 
     return NextResponse.json({
       ok: true,
-      type: '1h_reminder',
+      type: 'late_check',
       sent,
       skipped,
       processedIds,
       debug,
     });
   } catch (error) {
-    console.error('Erro em /api/jobs/send-booking-reminders:', error);
+    console.error('Erro em /api/jobs/check-late-bookings:', error);
     return NextResponse.json({ error: 'Erro interno do servidor.' }, { status: 500 });
   }
 }

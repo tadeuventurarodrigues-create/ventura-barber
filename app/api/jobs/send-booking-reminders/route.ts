@@ -3,6 +3,9 @@ import { supabaseAdmin } from '@/lib/supabase-admin';
 import { sendWhatsAppMessage } from '@/lib/whatsapp';
 import { normalizePhone } from '@/lib/phone';
 
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
+
 const APP_TIMEZONE = 'America/Fortaleza';
 
 function formatDateBR(value: string) {
@@ -219,6 +222,7 @@ remarcar`;
     }
 
     return NextResponse.json({
+      buildTag: 'jobs-v2',
       ok: true,
       type: '1h_reminder',
       sent,

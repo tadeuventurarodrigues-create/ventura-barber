@@ -1,10 +1,13 @@
 import { NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase-admin';
 
+const APP_TIMEZONE = 'America/Fortaleza';
+
 function toMinutes(time: string) {
   const [hour, minute] = String(time || '00:00')
     .split(':')
     .map(Number);
+
   return hour * 60 + minute;
 }
 
@@ -20,12 +23,35 @@ function getWeekdayFromDate(dateStr: string) {
   return dt.getDay();
 }
 
-function getTodayIso() {
+function getNowPartsInTimezone(timeZone: string) {
   const now = new Date();
-  const y = now.getFullYear();
-  const m = String(now.getMonth() + 1).padStart(2, '0');
-  const d = String(now.getDate()).padStart(2, '0');
-  return `${y}-${m}-${d}`;
+
+  const formatter = new Intl.DateTimeFormat('en-CA', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  });
+
+  const parts = formatter.formatToParts(now);
+
+  const get = (type: string) => parts.find((part) => part.type === type)?.value || '00';
+
+  return {
+    year: Number(get('year')),
+    month: Number(get('month')),
+    day: Number(get('day')),
+    hour: Number(get('hour')),
+    minute: Number(get('minute')),
+  };
+}
+
+function getTodayIso(timeZone = APP_TIMEZONE) {
+  const { year, month, day } = getNowPartsInTimezone(timeZone);
+  return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
 }
 
 function addDaysIso(baseIso: string, days: number) {
@@ -36,12 +62,18 @@ function addDaysIso(baseIso: string, days: number) {
   const yy = dt.getFullYear();
   const mm = String(dt.getMonth() + 1).padStart(2, '0');
   const dd = String(dt.getDate()).padStart(2, '0');
+
   return `${yy}-${mm}-${dd}`;
 }
 
-function getCurrentMinutes() {
-  const now = new Date();
-  return now.getHours() * 60 + now.getMinutes();
+function getCurrentMinutes(timeZone = APP_TIMEZONE) {
+  const { hour, minute } = getNowPartsInTimezone(timeZone);
+  return hour * 60 + minute;
+}
+
+function getNextSlotMinutes(slot: number, timeZone = APP_TIMEZONE) {
+  const nowMinutes = getCurrentMinutes(timeZone);
+  return Math.ceil(nowMinutes / slot) * slot;
 }
 
 export async function GET(req: Request) {
@@ -137,13 +169,13 @@ export async function GET(req: Request) {
 
     const times: string[] = [];
     const isToday = bookingDate === today;
-    const currentMinutes = getCurrentMinutes();
+    const nextAvailableSlotMinutes = isToday ? getNextSlotMinutes(slot) : 0;
 
     for (let current = startMinutes; current + duration <= endMinutes; current += slot) {
       const candidateStart = current;
       const candidateEnd = current + duration;
 
-      if (isToday && candidateStart < currentMinutes) {
+      if (isToday && candidateStart < nextAvailableSlotMinutes) {
         continue;
       }
 

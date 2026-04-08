@@ -26,6 +26,8 @@ type CustomerLookupResponse = {
   } | null;
 };
 
+type DateMode = 'today' | 'tomorrow' | 'custom';
+
 type Props = {
   barbershopId: string;
   barbershopName: string;
@@ -56,6 +58,26 @@ function formatWhatsappInput(value: string) {
   return `(${digits.slice(0, 2)}) ${digits.slice(2, 7)}-${digits.slice(7)}`;
 }
 
+function getLocalIsoDate(date = new Date()) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function addDaysToIsoDate(isoDate: string, days: number) {
+  const [year, month, day] = isoDate.split('-').map(Number);
+  const dt = new Date(year, month - 1, day);
+  dt.setDate(dt.getDate() + days);
+  return getLocalIsoDate(dt);
+}
+
+function formatDateModeLabel(mode: DateMode) {
+  if (mode === 'today') return 'Hoje';
+  if (mode === 'tomorrow') return 'Amanhã';
+  return 'Data escolhida';
+}
+
 export function PublicBookingForm({
   barbershopId,
   barbershopName,
@@ -64,9 +86,14 @@ export function PublicBookingForm({
   loyaltyEnabled,
   loyaltyRules,
 }: Props) {
+  const todayIso = useMemo(() => getLocalIsoDate(), []);
+  const tomorrowIso = useMemo(() => addDaysToIsoDate(todayIso, 1), [todayIso]);
+  const maxBookingDate = useMemo(() => addDaysToIsoDate(todayIso, 6), [todayIso]);
+
   const [serviceId, setServiceId] = useState('');
   const [professionalId, setProfessionalId] = useState('');
-  const [bookingDate, setBookingDate] = useState('');
+  const [dateMode, setDateMode] = useState<DateMode>('today');
+  const [bookingDate, setBookingDate] = useState(todayIso);
   const [startTime, setStartTime] = useState('');
   const [customerName, setCustomerName] = useState('');
   const [customerWhatsapp, setCustomerWhatsapp] = useState('');
@@ -91,6 +118,30 @@ export function PublicBookingForm({
   );
 
   useEffect(() => {
+    if (!phoneStepUnlocked) return;
+
+    if (dateMode === 'today') {
+      if (bookingDate !== todayIso) {
+        setBookingDate(todayIso);
+        setStartTime('');
+      }
+      return;
+    }
+
+    if (dateMode === 'tomorrow') {
+      if (bookingDate !== tomorrowIso) {
+        setBookingDate(tomorrowIso);
+        setStartTime('');
+      }
+      return;
+    }
+
+    if (!bookingDate) {
+      setBookingDate(todayIso);
+    }
+  }, [dateMode, phoneStepUnlocked, bookingDate, todayIso, tomorrowIso]);
+
+  useEffect(() => {
     async function loadTimes() {
       if (!phoneStepUnlocked || !serviceId || !professionalId || !bookingDate) {
         setTimes([]);
@@ -108,12 +159,17 @@ export function PublicBookingForm({
           booking_date: bookingDate,
         });
 
-        const res = await fetch(`/api/available-times?${params.toString()}`);
+        const res = await fetch(`/api/available-times?${params.toString()}`, {
+          cache: 'no-store',
+        });
         const data = await res.json();
 
-        setTimes(data.times || []);
+        const receivedTimes = Array.isArray(data.times) ? data.times : [];
+        setTimes(receivedTimes);
+        setStartTime((current) => (receivedTimes.includes(current) ? current : ''));
       } catch {
         setTimes([]);
+        setStartTime('');
       } finally {
         setLoadingTimes(false);
       }
@@ -158,6 +214,9 @@ export function PublicBookingForm({
       }
 
       setPhoneStepUnlocked(true);
+      setDateMode('today');
+      setBookingDate(todayIso);
+      setStartTime('');
 
       if (data.found && data.customer) {
         setCustomerFound(true);
@@ -230,7 +289,8 @@ export function PublicBookingForm({
 
       setServiceId('');
       setProfessionalId('');
-      setBookingDate('');
+      setDateMode('today');
+      setBookingDate(todayIso);
       setStartTime('');
       setTimes([]);
       setSaving(false);
@@ -239,6 +299,41 @@ export function PublicBookingForm({
       setSaving(false);
     }
   }
+
+  function handleDateModeChange(mode: DateMode) {
+    setDateMode(mode);
+    setStartTime('');
+
+    if (mode === 'today') {
+      setBookingDate(todayIso);
+      return;
+    }
+
+    if (mode === 'tomorrow') {
+      setBookingDate(tomorrowIso);
+      return;
+    }
+
+    if (!bookingDate) {
+      setBookingDate(todayIso);
+    }
+  }
+
+  const noTimesMessage = useMemo(() => {
+    if (!phoneStepUnlocked || !serviceId || !professionalId || !bookingDate) return '';
+    if (loadingTimes) return '';
+    if (times.length > 0) return '';
+
+    if (dateMode === 'today') {
+      return 'Nenhum horário disponível hoje. Tente amanhã ou escolha outra data.';
+    }
+
+    if (dateMode === 'tomorrow') {
+      return 'Nenhum horário disponível amanhã. Escolha outra data.';
+    }
+
+    return 'Nenhum horário disponível para esta data.';
+  }, [phoneStepUnlocked, serviceId, professionalId, bookingDate, loadingTimes, times.length, dateMode]);
 
   return (
     <form onSubmit={handleSubmit} className="space-y-5">
@@ -260,7 +355,8 @@ export function PublicBookingForm({
               setCustomerName('');
               setServiceId('');
               setProfessionalId('');
-              setBookingDate('');
+              setDateMode('today');
+              setBookingDate(todayIso);
               setStartTime('');
               setTimes([]);
               setLookupMessage('');
@@ -355,42 +451,84 @@ export function PublicBookingForm({
             </select>
           </div>
 
-          <div className="grid gap-4 md:grid-cols-2">
-            <div>
-              <label className="mb-2 block text-sm text-white/70">Data</label>
-              <input
-                className="field"
-                type="date"
-                value={bookingDate}
-                onChange={(e) => setBookingDate(e.target.value)}
-                required
-              />
-            </div>
+          <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
+            <label className="mb-3 block text-sm text-white/70">Data</label>
 
-            <div>
-              <label className="mb-2 block text-sm text-white/70">Horário</label>
-              <select
-                className="field"
-                value={startTime}
-                onChange={(e) => setStartTime(e.target.value)}
-                required
-                disabled={!serviceId || !professionalId || !bookingDate || loadingTimes}
+            <div className="grid grid-cols-3 gap-2">
+              <button
+                type="button"
+                className={`btn ${dateMode === 'today' ? 'btn-primary' : 'btn-dark'}`}
+                onClick={() => handleDateModeChange('today')}
               >
-                <option value="">
-                  {loadingTimes
-                    ? 'Carregando horários...'
-                    : times.length
-                      ? 'Escolha o horário'
-                      : 'Nenhum horário disponível'}
-                </option>
+                Hoje
+              </button>
 
-                {times.map((time) => (
-                  <option key={time} value={time}>
-                    {time}
-                  </option>
-                ))}
-              </select>
+              <button
+                type="button"
+                className={`btn ${dateMode === 'tomorrow' ? 'btn-primary' : 'btn-dark'}`}
+                onClick={() => handleDateModeChange('tomorrow')}
+              >
+                Amanhã
+              </button>
+
+              <button
+                type="button"
+                className={`btn ${dateMode === 'custom' ? 'btn-primary' : 'btn-dark'}`}
+                onClick={() => handleDateModeChange('custom')}
+              >
+                Escolher data
+              </button>
             </div>
+
+            <p className="mt-3 text-xs text-white/55">
+              Selecionado: {formatDateModeLabel(dateMode)}
+            </p>
+
+            {dateMode === 'custom' ? (
+              <div className="mt-3">
+                <input
+                  className="field"
+                  type="date"
+                  min={todayIso}
+                  max={maxBookingDate}
+                  value={bookingDate}
+                  onChange={(e) => {
+                    setBookingDate(e.target.value);
+                    setStartTime('');
+                  }}
+                  required
+                />
+              </div>
+            ) : null}
+          </div>
+
+          <div>
+            <label className="mb-2 block text-sm text-white/70">Horário</label>
+            <select
+              className="field"
+              value={startTime}
+              onChange={(e) => setStartTime(e.target.value)}
+              required
+              disabled={!serviceId || !professionalId || !bookingDate || loadingTimes}
+            >
+              <option value="">
+                {loadingTimes
+                  ? 'Carregando horários...'
+                  : times.length
+                    ? 'Escolha o horário'
+                    : 'Nenhum horário disponível'}
+              </option>
+
+              {times.map((time) => (
+                <option key={time} value={time}>
+                  {time}
+                </option>
+              ))}
+            </select>
+
+            {noTimesMessage ? (
+              <p className="mt-2 text-xs text-amber-200">{noTimesMessage}</p>
+            ) : null}
           </div>
 
           {selectedService ? (

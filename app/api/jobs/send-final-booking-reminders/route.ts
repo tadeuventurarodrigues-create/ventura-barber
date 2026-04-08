@@ -7,7 +7,7 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 const APP_TIMEZONE = 'America/Fortaleza';
-const BUILD_TAG = 'jobs-v3';
+const BUILD_TAG = 'jobs-v4';
 
 function formatDateBR(value: string) {
   if (!value) return value;
@@ -101,6 +101,7 @@ export async function GET(req: Request) {
 
     const todayIso = getTodayIso(APP_TIMEZONE);
     const nowComparable = getCurrentComparableMinutes(APP_TIMEZONE);
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL || '';
 
     const { data: bookings, error } = await supabaseAdmin
       .from('bookings')
@@ -113,6 +114,8 @@ export async function GET(req: Request) {
         customer_name,
         customer_whatsapp,
         final_reminder_sent_at,
+        cancel_token,
+        daily_order_number,
         service:services(
           id,
           name
@@ -184,6 +187,9 @@ export async function GET(req: Request) {
       }
 
       const evolutionConfig = getEvolutionConfigFromProfessional(professional);
+      const cancelUrl = booking.cancel_token
+        ? `${appUrl}/cancelar/${booking.cancel_token}`
+        : '';
 
       const message = `Olá, ${booking.customer_name || 'cliente'}.
 
@@ -193,8 +199,10 @@ Serviço: ${service?.name || 'Serviço'}
 Profissional: ${professional?.name || 'Barbeiro'}
 Data: ${formatDateBR(booking.booking_date)}
 Hora: ${booking.start_time}
+Código: ${booking.daily_order_number || '-'}
 
-Estamos te aguardando.`;
+Se não puder comparecer, cancele aqui:
+${cancelUrl}`;
 
       try {
         await sendWhatsAppMessage(customerPhone, message, evolutionConfig);

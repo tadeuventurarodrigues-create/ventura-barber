@@ -3,6 +3,9 @@ import { supabaseAdmin } from '@/lib/supabase-admin';
 import { normalizePhone } from '@/lib/phone';
 import { sendWhatsAppMessage } from '@/lib/whatsapp';
 
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
+
 function extractText(payload: any) {
   return (
     payload?.data?.message?.conversation ||
@@ -10,12 +13,35 @@ function extractText(payload: any) {
     payload?.data?.message?.imageMessage?.caption ||
     payload?.data?.message?.videoMessage?.caption ||
     payload?.data?.body ||
+    payload?.body ||
+    payload?.text ||
+    payload?.message?.conversation ||
+    payload?.message?.extendedTextMessage?.text ||
+    payload?.message?.imageMessage?.caption ||
+    payload?.message?.videoMessage?.caption ||
+    payload?.content ||
     ''
   );
 }
 
 function extractRemoteJid(payload: any) {
-  return payload?.data?.key?.remoteJid || payload?.data?.message?.key?.remoteJid || '';
+  return (
+    payload?.data?.key?.remoteJid ||
+    payload?.data?.message?.key?.remoteJid ||
+    payload?.key?.remoteJid ||
+    payload?.remoteJid ||
+    payload?.jid ||
+    ''
+  );
+}
+
+function extractFromMe(payload: any) {
+  return Boolean(
+    payload?.data?.key?.fromMe ??
+      payload?.key?.fromMe ??
+      payload?.fromMe ??
+      false
+  );
 }
 
 function isGroupJid(remoteJid: string) {
@@ -235,7 +261,12 @@ async function findCustomerUpcomingBookings(phone: string, pendingOnly = false) 
 
   const { data, error } = await query;
 
-  if (error || !data?.length) return [];
+  if (error) {
+    console.error('Erro ao buscar agendamentos do cliente:', error);
+    return [];
+  }
+
+  if (!data?.length) return [];
 
   const now = new Date();
 
@@ -371,7 +402,7 @@ O cliente cancelou pelo WhatsApp e confirmou o cancelamento.`,
         evolutionConfig
       );
     } catch (err) {
-        console.error('Erro ao avisar barbeiro sobre cancelamento automático:', err);
+      console.error('Erro ao avisar barbeiro sobre cancelamento automático:', err);
     }
   }
 
@@ -460,19 +491,34 @@ export async function POST(req: Request) {
   try {
     const payload = await req.json();
 
-    const fromMe = Boolean(payload?.data?.key?.fromMe);
+    console.log('WEBHOOK_PAYLOAD:', JSON.stringify(payload, null, 2));
+
+    const fromMe = extractFromMe(payload);
+    const remoteJid = extractRemoteJid(payload);
+    const rawText = extractText(payload);
+
+    console.log('WEBHOOK_DEBUG:', {
+      fromMe,
+      remoteJid,
+      rawText,
+    });
+
     if (fromMe) {
       return NextResponse.json({ ok: true, ignored: 'fromMe' });
     }
 
-    const remoteJid = extractRemoteJid(payload);
     if (!remoteJid || isGroupJid(remoteJid)) {
       return NextResponse.json({ ok: true, ignored: 'group-or-empty' });
     }
 
     const senderNumber = normalizePhone(remoteJid);
-    const rawText = extractText(payload);
     const text = String(rawText || '').trim().toLowerCase();
+
+    console.log('WEBHOOK_NORMALIZED:', {
+      senderNumber,
+      text,
+      phoneCandidates: buildPhoneCandidates(remoteJid),
+    });
 
     if (!senderNumber || !text) {
       return NextResponse.json({ ok: true, ignored: 'empty-message' });

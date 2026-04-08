@@ -20,11 +20,12 @@ function formatDateBR(value: string) {
   return `${day}/${month}/${year}`;
 }
 
-export default function CancelBookingPage({
-  params,
-}: {
-  params: { token: string };
-}) {
+type CancelBookingPageProps = {
+  params: Promise<{ token: string }>;
+};
+
+export default function CancelBookingPage({ params }: CancelBookingPageProps) {
+  const [token, setToken] = useState('');
   const [booking, setBooking] = useState<BookingData | null>(null);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
@@ -32,9 +33,12 @@ export default function CancelBookingPage({
   const [error, setError] = useState('');
 
   useEffect(() => {
-    async function load() {
+    async function resolveParamsAndLoad() {
       try {
-        const res = await fetch(`/api/cancel-booking/${params.token}`, {
+        const resolved = await params;
+        setToken(resolved.token);
+
+        const res = await fetch(`/api/cancel-booking/${resolved.token}`, {
           cache: 'no-store',
         });
 
@@ -53,13 +57,16 @@ export default function CancelBookingPage({
       }
     }
 
-    load();
-  }, [params.token]);
+    resolveParamsAndLoad();
+  }, [params]);
 
   async function handleCancel() {
+    if (!token) return;
+
     try {
       setSubmitting(true);
-      const res = await fetch(`/api/cancel-booking/${params.token}`, {
+
+      const res = await fetch(`/api/cancel-booking/${token}`, {
         method: 'POST',
       });
 
@@ -79,7 +86,14 @@ export default function CancelBookingPage({
   }
 
   return (
-    <main style={{ minHeight: '100vh', background: '#0b0b0b', color: '#fff', padding: '24px' }}>
+    <main
+      style={{
+        minHeight: '100vh',
+        background: '#0b0b0b',
+        color: '#fff',
+        padding: '24px',
+      }}
+    >
       <div
         style={{
           maxWidth: 520,
@@ -94,21 +108,35 @@ export default function CancelBookingPage({
 
         {loading && <p>Carregando...</p>}
 
-        {!loading && error && (
-          <p style={{ color: '#ff7b7b' }}>{error}</p>
-        )}
+        {!loading && error && <p style={{ color: '#ff7b7b' }}>{error}</p>}
 
         {!loading && booking && !done && (
           <>
             <div style={{ lineHeight: 1.8, marginBottom: 24 }}>
-              <div><strong>Barbearia:</strong> {booking.barbershop?.name || '-'}</div>
-              <div><strong>Cliente:</strong> {booking.customer_name || '-'}</div>
-              <div><strong>Serviço:</strong> {booking.service?.name || '-'}</div>
-              <div><strong>Profissional:</strong> {booking.professional?.name || '-'}</div>
-              <div><strong>Data:</strong> {formatDateBR(booking.booking_date)}</div>
-              <div><strong>Hora:</strong> {booking.start_time}</div>
-              <div><strong>Código:</strong> {booking.daily_order_number}</div>
-              <div><strong>Status:</strong> {booking.status}</div>
+              <div>
+                <strong>Barbearia:</strong> {booking.barbershop?.name || '-'}
+              </div>
+              <div>
+                <strong>Cliente:</strong> {booking.customer_name || '-'}
+              </div>
+              <div>
+                <strong>Serviço:</strong> {booking.service?.name || '-'}
+              </div>
+              <div>
+                <strong>Profissional:</strong> {booking.professional?.name || '-'}
+              </div>
+              <div>
+                <strong>Data:</strong> {formatDateBR(booking.booking_date)}
+              </div>
+              <div>
+                <strong>Hora:</strong> {booking.start_time}
+              </div>
+              <div>
+                <strong>Código:</strong> {booking.daily_order_number}
+              </div>
+              <div>
+                <strong>Status:</strong> {booking.status}
+              </div>
             </div>
 
             <button

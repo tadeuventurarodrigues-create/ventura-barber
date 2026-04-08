@@ -258,11 +258,10 @@ Serviço: ${service.name}
 Profissional: ${professional.name}
 Data: ${formatDateBR(booking_date)}
 Hora: ${start_time}
+Código: ${daily_order_number}
 
-Para cancelar este agendamento a qualquer momento, responda:
-cancelar
-
-Se você solicitar o cancelamento, nós vamos pedir uma confirmação final antes de cancelar.`,
+Para cancelar este agendamento, responda:
+cancelar ${daily_order_number}`,
         barberEvolutionConfig
       );
     } catch (error) {

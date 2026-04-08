@@ -78,10 +78,6 @@ function isValidDateString(value: string) {
   return /^\d{4}-\d{2}-\d{2}$/.test(value);
 }
 
-function isValidTimeString(value: string) {
-  return /^\d{2}:\d{2}$/.test(value);
-}
-
 function resolveDateToken(token?: string) {
   if (!token) return getTodayIso();
   if (token === 'hoje') return getTodayIso();
@@ -108,9 +104,39 @@ function getRelationItem<T = any>(value: any): T | null {
   return value || null;
 }
 
+function buildPhoneCandidates(phone: string) {
+  const normalized = normalizePhone(phone || '');
+  if (!normalized) return [];
+
+  const set = new Set<string>();
+  set.add(normalized);
+
+  if (normalized.startsWith('55')) {
+    const withoutCountry = normalized.slice(2);
+    set.add(withoutCountry);
+
+    if (withoutCountry.length >= 10) {
+      const ddd = withoutCountry.slice(0, 2);
+      const local = withoutCountry.slice(2);
+
+      if (local.length === 9 && local.startsWith('9')) {
+        set.add(`55${ddd}${local.slice(1)}`);
+        set.add(`${ddd}${local.slice(1)}`);
+      }
+
+      if (local.length === 8) {
+        set.add(`55${ddd}9${local}`);
+        set.add(`${ddd}9${local}`);
+      }
+    }
+  }
+
+  return Array.from(set);
+}
+
 async function findProfessionalByWhatsapp(phone: string) {
-  const normalized = normalizePhone(phone);
-  if (!normalized) return null;
+  const candidates = buildPhoneCandidates(phone);
+  if (!candidates.length) return null;
 
   const { data } = await supabaseAdmin
     .from('professionals')
@@ -128,7 +154,7 @@ async function findProfessionalByWhatsapp(phone: string) {
         name
       )
     `)
-    .eq('whatsapp_number', normalized)
+    .in('whatsapp_number', candidates)
     .maybeSingle();
 
   return data || null;
@@ -174,13 +200,13 @@ async function getBookingsText(professionalId: string, bookingDate: string, titl
 ${lines.join('\n')}`;
 }
 
-async function findNextBookingByCustomerWhatsapp(phone: string) {
-  const normalized = normalizePhone(phone);
-  if (!normalized) return null;
+async function findCustomerUpcomingBookings(phone: string, pendingOnly = false) {
+  const candidates = buildPhoneCandidates(phone);
+  if (!candidates.length) return [];
 
   const today = getTodayIso();
 
-  const { data: bookings, error } = await supabaseAdmin
+  let query = supabaseAdmin
     .from('bookings')
     .select(`
       *,
@@ -197,62 +223,36 @@ async function findNextBookingByCustomerWhatsapp(phone: string) {
       customer:customers(id, name, whatsapp_number, phone),
       barbershop:barbershops(id, name, whatsapp_number)
     `)
-    .eq('customer_whatsapp', normalized)
+    .in('customer_whatsapp', candidates)
     .eq('status', 'confirmed')
     .gte('booking_date', today)
     .order('booking_date', { ascending: true })
     .order('start_time', { ascending: true });
 
-  if (error || !bookings?.length) return null;
+  if (pendingOnly) {
+    query = query.eq('cancel_confirmation_pending', true);
+  }
+
+  const { data, error } = await query;
+
+  if (error || !data?.length) return [];
 
   const now = new Date();
-  const next = bookings.find((booking: any) => {
+
+  return data.filter((booking: any) => {
     const bookingDt = combineDateTime(booking.booking_date, booking.start_time);
     return bookingDt.getTime() > now.getTime();
   });
+}
 
-  return next || null;
+async function findNextBookingByCustomerWhatsapp(phone: string) {
+  const list = await findCustomerUpcomingBookings(phone, false);
+  return list[0] || null;
 }
 
 async function findNextBookingPendingCancellationByCustomerWhatsapp(phone: string) {
-  const normalized = normalizePhone(phone);
-  if (!normalized) return null;
-
-  const today = getTodayIso();
-
-  const { data: bookings, error } = await supabaseAdmin
-    .from('bookings')
-    .select(`
-      *,
-      service:services(id, name),
-      professional:professionals(
-        id,
-        name,
-        whatsapp_number,
-        evolution_enabled,
-        evolution_api_url,
-        evolution_instance,
-        evolution_api_key
-      ),
-      customer:customers(id, name, whatsapp_number, phone),
-      barbershop:barbershops(id, name, whatsapp_number)
-    `)
-    .eq('customer_whatsapp', normalized)
-    .eq('status', 'confirmed')
-    .eq('cancel_confirmation_pending', true)
-    .gte('booking_date', today)
-    .order('booking_date', { ascending: true })
-    .order('start_time', { ascending: true });
-
-  if (error || !bookings?.length) return null;
-
-  const now = new Date();
-  const next = bookings.find((booking: any) => {
-    const bookingDt = combineDateTime(booking.booking_date, booking.start_time);
-    return bookingDt.getTime() > now.getTime();
-  });
-
-  return next || null;
+  const list = await findCustomerUpcomingBookings(phone, true);
+  return list[0] || null;
 }
 
 async function requestBookingCancellationByCustomerWhatsapp(phone: string) {
@@ -262,15 +262,7 @@ async function requestBookingCancellationByCustomerWhatsapp(phone: string) {
     return { ok: false, reason: 'not-found' as const };
   }
 
-  const professional = getRelationItem<{
-    name?: string;
-    whatsapp_number?: string;
-    evolution_enabled?: boolean;
-    evolution_api_url?: string;
-    evolution_instance?: string;
-    evolution_api_key?: string;
-  }>(booking?.professional);
-
+  const professional = getRelationItem<any>(booking?.professional);
   const service = getRelationItem<{ name?: string }>(booking?.service);
   const barbershop = getRelationItem<{ name?: string }>(booking?.barbershop);
 
@@ -317,14 +309,7 @@ async function confirmBookingCancellationByCustomerWhatsapp(phone: string) {
   }
 
   const customer = getRelationItem<{ name?: string; whatsapp_number?: string; phone?: string }>(booking?.customer);
-  const professional = getRelationItem<{
-    name?: string;
-    whatsapp_number?: string;
-    evolution_enabled?: boolean;
-    evolution_api_url?: string;
-    evolution_instance?: string;
-    evolution_api_key?: string;
-  }>(booking?.professional);
+  const professional = getRelationItem<any>(booking?.professional);
   const service = getRelationItem<{ name?: string }>(booking?.service);
   const barbershop = getRelationItem<{ name?: string; whatsapp_number?: string }>(booking?.barbershop);
 
@@ -400,14 +385,7 @@ async function cancelPendingCancellationRequestByCustomerWhatsapp(phone: string)
     return { ok: false, reason: 'not-found' as const };
   }
 
-  const professional = getRelationItem<{
-    name?: string;
-    evolution_enabled?: boolean;
-    evolution_api_url?: string;
-    evolution_instance?: string;
-    evolution_api_key?: string;
-  }>(booking?.professional);
-
+  const professional = getRelationItem<any>(booking?.professional);
   const evolutionConfig = getEvolutionConfigFromProfessional(professional);
 
   const { error: updateError } = await supabaseAdmin
@@ -497,27 +475,51 @@ export async function POST(req: Request) {
     }
 
     if (text === 'cancelar') {
-      const customerCancellationRequest = await requestBookingCancellationByCustomerWhatsapp(senderNumber);
+      const result = await requestBookingCancellationByCustomerWhatsapp(senderNumber);
 
-      if (customerCancellationRequest.ok) {
+      if (result.ok) {
         return NextResponse.json({ ok: true, action: 'customer-cancel-requested' });
       }
+
+      await sendWhatsAppMessage(
+        senderNumber,
+        `Não encontrei um agendamento futuro confirmado para este número.`,
+        null
+      );
+
+      return NextResponse.json({ ok: true, action: 'customer-cancel-not-found' });
     }
 
     if (text === 'sim') {
-      const confirmedCancellation = await confirmBookingCancellationByCustomerWhatsapp(senderNumber);
+      const result = await confirmBookingCancellationByCustomerWhatsapp(senderNumber);
 
-      if (confirmedCancellation.ok) {
+      if (result.ok) {
         return NextResponse.json({ ok: true, action: 'customer-cancel-confirmed' });
       }
+
+      await sendWhatsAppMessage(
+        senderNumber,
+        `Não encontrei nenhum pedido de cancelamento pendente para confirmar.`,
+        null
+      );
+
+      return NextResponse.json({ ok: true, action: 'customer-cancel-confirm-not-found' });
     }
 
     if (text === 'não' || text === 'nao') {
-      const cancelledRequest = await cancelPendingCancellationRequestByCustomerWhatsapp(senderNumber);
+      const result = await cancelPendingCancellationRequestByCustomerWhatsapp(senderNumber);
 
-      if (cancelledRequest.ok) {
+      if (result.ok) {
         return NextResponse.json({ ok: true, action: 'customer-cancel-aborted' });
       }
+
+      await sendWhatsAppMessage(
+        senderNumber,
+        `Não encontrei nenhum pedido de cancelamento pendente para cancelar.`,
+        null
+      );
+
+      return NextResponse.json({ ok: true, action: 'customer-cancel-abort-not-found' });
     }
 
     const professional = await findProfessionalByWhatsapp(senderNumber);

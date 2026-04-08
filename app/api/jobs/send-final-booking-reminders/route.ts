@@ -7,6 +7,7 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 const APP_TIMEZONE = 'America/Fortaleza';
+const BUILD_TAG = 'jobs-v3';
 
 function formatDateBR(value: string) {
   if (!value) return value;
@@ -49,13 +50,20 @@ function getTodayIso(timeZone = APP_TIMEZONE) {
   return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
 }
 
-function combineDateTime(dateStr: string, timeStr: string) {
+function toLocalComparableMinutes(dateStr: string, timeStr: string) {
   const [year, month, day] = dateStr.split('-').map(Number);
   const [hour, minute] = String(timeStr || '00:00:00')
     .split(':')
     .map(Number);
 
-  return new Date(year, month - 1, day, hour || 0, minute || 0, 0, 0);
+  const dayKey = year * 372 + month * 31 + day;
+  return dayKey * 1440 + (hour || 0) * 60 + (minute || 0);
+}
+
+function getCurrentComparableMinutes(timeZone = APP_TIMEZONE) {
+  const { year, month, day, hour, minute } = getNowPartsInTimezone(timeZone);
+  const dayKey = year * 372 + month * 31 + day;
+  return dayKey * 1440 + hour * 60 + minute;
 }
 
 function getEvolutionConfigFromProfessional(professional: any) {
@@ -92,7 +100,7 @@ export async function GET(req: Request) {
     }
 
     const todayIso = getTodayIso(APP_TIMEZONE);
-    const now = new Date();
+    const nowComparable = getCurrentComparableMinutes(APP_TIMEZONE);
 
     const { data: bookings, error } = await supabaseAdmin
       .from('bookings')
@@ -143,12 +151,13 @@ export async function GET(req: Request) {
       const professional = firstItem(booking.professional);
       const barbershop = firstItem(booking.barbershop);
 
-      const bookingDateTime = combineDateTime(booking.booking_date, booking.start_time);
-      const diffMinutes = Math.round(
-        (bookingDateTime.getTime() - now.getTime()) / 60000
+      const bookingComparable = toLocalComparableMinutes(
+        booking.booking_date,
+        booking.start_time
       );
 
-      // envia quando faltar 10 min ou menos, sem passar da hora
+      const diffMinutes = bookingComparable - nowComparable;
+
       if (diffMinutes > 10 || diffMinutes < 0) {
         skipped++;
         debug.push({
@@ -218,7 +227,7 @@ Estamos te aguardando.`;
     }
 
     return NextResponse.json({
-      buildTag: 'jobs-v2',
+      buildTag: BUILD_TAG,
       ok: true,
       type: '10min_reminder',
       sent,

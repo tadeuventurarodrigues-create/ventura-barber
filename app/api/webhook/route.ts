@@ -112,17 +112,6 @@ function resolveDateToken(token?: string) {
   return null;
 }
 
-function timeToMinutes(time: string) {
-  const [h, m] = String(time || '00:00').split(':').map(Number);
-  return h * 60 + m;
-}
-
-function minutesToTime(minutes: number) {
-  const h = String(Math.floor(minutes / 60)).padStart(2, '0');
-  const m = String(minutes % 60).padStart(2, '0');
-  return `${h}:${m}`;
-}
-
 function getRelationItem<T = any>(value: any): T | null {
   if (Array.isArray(value)) {
     return value[0] || null;

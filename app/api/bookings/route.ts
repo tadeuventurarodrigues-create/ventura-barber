@@ -108,6 +108,7 @@ export async function POST(req: Request) {
           name: customer_name,
           phone: normalizedCustomerWhatsapp,
           whatsapp_number: normalizedCustomerWhatsapp,
+          whatsapp_jid: null,
           total_bookings: 0,
         })
         .select('id')
@@ -189,6 +190,7 @@ export async function POST(req: Request) {
         price: bookingPrice,
         customer_name,
         customer_whatsapp: normalizedCustomerWhatsapp,
+        customer_jid: null,
         cancel_confirmation_pending: false,
       })
       .select('*')

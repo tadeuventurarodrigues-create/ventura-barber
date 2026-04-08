@@ -1,3 +1,4 @@
+import { randomUUID } from 'crypto';
 import { NextResponse } from 'next/server';
 import { sendWhatsAppMessage } from '@/lib/whatsapp';
 import { normalizePhone } from '@/lib/phone';
@@ -174,6 +175,10 @@ export async function POST(req: Request) {
       );
     }
 
+    const cancelToken = randomUUID();
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL || '';
+    const cancelUrl = `${appUrl}/cancelar/${cancelToken}`;
+
     const bookingRes = await supabaseAdmin
       .from('bookings')
       .insert({
@@ -192,6 +197,7 @@ export async function POST(req: Request) {
         customer_whatsapp: normalizedCustomerWhatsapp,
         customer_jid: null,
         cancel_confirmation_pending: false,
+        cancel_token: cancelToken,
       })
       .select('*')
       .single();
@@ -260,8 +266,8 @@ Data: ${formatDateBR(booking_date)}
 Hora: ${start_time}
 Código: ${daily_order_number}
 
-Para cancelar este agendamento, responda:
-cancelar ${daily_order_number}`,
+Para cancelar seu agendamento, clique no link abaixo:
+${cancelUrl}`,
         barberEvolutionConfig
       );
     } catch (error) {

@@ -371,7 +371,7 @@ O cliente cancelou pelo WhatsApp e confirmou o cancelamento.`,
         evolutionConfig
       );
     } catch (err) {
-      console.error('Erro ao avisar barbeiro sobre cancelamento automático:', err);
+        console.error('Erro ao avisar barbeiro sobre cancelamento automático:', err);
     }
   }
 
@@ -409,7 +409,11 @@ async function cancelPendingCancellationRequestByCustomerWhatsapp(phone: string)
   return { ok: true, booking };
 }
 
-async function findBookingByDailyNumber(professionalId: string, bookingDate: string, dailyOrderNumber: number) {
+async function findBookingByDailyNumber(
+  professionalId: string,
+  bookingDate: string,
+  dailyOrderNumber: number
+) {
   return await supabaseAdmin
     .from('bookings')
     .select(`
@@ -481,13 +485,12 @@ export async function POST(req: Request) {
         return NextResponse.json({ ok: true, action: 'customer-cancel-requested' });
       }
 
-      await sendWhatsAppMessage(
+      return NextResponse.json({
+        ok: true,
+        action: 'customer-cancel-not-found',
+        reason: 'Nenhum agendamento futuro confirmado encontrado para este número.',
         senderNumber,
-        `Não encontrei um agendamento futuro confirmado para este número.`,
-        null
-      );
-
-      return NextResponse.json({ ok: true, action: 'customer-cancel-not-found' });
+      });
     }
 
     if (text === 'sim') {
@@ -497,13 +500,12 @@ export async function POST(req: Request) {
         return NextResponse.json({ ok: true, action: 'customer-cancel-confirmed' });
       }
 
-      await sendWhatsAppMessage(
+      return NextResponse.json({
+        ok: true,
+        action: 'customer-cancel-confirm-not-found',
+        reason: 'Nenhum pedido de cancelamento pendente encontrado para este número.',
         senderNumber,
-        `Não encontrei nenhum pedido de cancelamento pendente para confirmar.`,
-        null
-      );
-
-      return NextResponse.json({ ok: true, action: 'customer-cancel-confirm-not-found' });
+      });
     }
 
     if (text === 'não' || text === 'nao') {
@@ -513,13 +515,12 @@ export async function POST(req: Request) {
         return NextResponse.json({ ok: true, action: 'customer-cancel-aborted' });
       }
 
-      await sendWhatsAppMessage(
+      return NextResponse.json({
+        ok: true,
+        action: 'customer-cancel-abort-not-found',
+        reason: 'Nenhum pedido de cancelamento pendente encontrado para este número.',
         senderNumber,
-        `Não encontrei nenhum pedido de cancelamento pendente para cancelar.`,
-        null
-      );
-
-      return NextResponse.json({ ok: true, action: 'customer-cancel-abort-not-found' });
+      });
     }
 
     const professional = await findProfessionalByWhatsapp(senderNumber);
@@ -580,7 +581,12 @@ Use:
         return NextResponse.json({ ok: true, action: 'cancel-invalid-date' });
       }
 
-      const { data: booking, error: findError } = await findBookingByDailyNumber(professional.id, targetDate, number);
+      const { data: booking, error: findError } = await findBookingByDailyNumber(
+        professional.id,
+        targetDate,
+        number
+      );
+
       if (findError || !booking) {
         await sendWhatsAppMessage(
           senderNumber,
@@ -611,7 +617,11 @@ Use:
         .eq('id', booking.id);
 
       if (updateError) {
-        await sendWhatsAppMessage(senderNumber, 'Erro ao cancelar agendamento.', evolutionConfig);
+        await sendWhatsAppMessage(
+          senderNumber,
+          'Erro ao cancelar agendamento.',
+          evolutionConfig
+        );
         return NextResponse.json({ ok: true, action: 'cancel-error' });
       }
 

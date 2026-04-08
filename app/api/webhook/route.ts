@@ -214,8 +214,103 @@ async function findNextBookingByCustomerWhatsapp(phone: string) {
   return next || null;
 }
 
-async function cancelBookingByCustomerWhatsapp(phone: string) {
+async function findNextBookingPendingCancellationByCustomerWhatsapp(phone: string) {
+  const normalized = normalizePhone(phone);
+  if (!normalized) return null;
+
+  const today = getTodayIso();
+
+  const { data: bookings, error } = await supabaseAdmin
+    .from('bookings')
+    .select(`
+      *,
+      service:services(id, name),
+      professional:professionals(
+        id,
+        name,
+        whatsapp_number,
+        evolution_enabled,
+        evolution_api_url,
+        evolution_instance,
+        evolution_api_key
+      ),
+      customer:customers(id, name, whatsapp_number, phone),
+      barbershop:barbershops(id, name, whatsapp_number)
+    `)
+    .eq('customer_whatsapp', normalized)
+    .eq('status', 'confirmed')
+    .eq('cancel_confirmation_pending', true)
+    .gte('booking_date', today)
+    .order('booking_date', { ascending: true })
+    .order('start_time', { ascending: true });
+
+  if (error || !bookings?.length) return null;
+
+  const now = new Date();
+  const next = bookings.find((booking: any) => {
+    const bookingDt = combineDateTime(booking.booking_date, booking.start_time);
+    return bookingDt.getTime() > now.getTime();
+  });
+
+  return next || null;
+}
+
+async function requestBookingCancellationByCustomerWhatsapp(phone: string) {
   const booking = await findNextBookingByCustomerWhatsapp(phone);
+
+  if (!booking) {
+    return { ok: false, reason: 'not-found' as const };
+  }
+
+  const professional = getRelationItem<{
+    name?: string;
+    whatsapp_number?: string;
+    evolution_enabled?: boolean;
+    evolution_api_url?: string;
+    evolution_instance?: string;
+    evolution_api_key?: string;
+  }>(booking?.professional);
+
+  const service = getRelationItem<{ name?: string }>(booking?.service);
+  const barbershop = getRelationItem<{ name?: string }>(booking?.barbershop);
+
+  const { error: updateError } = await supabaseAdmin
+    .from('bookings')
+    .update({
+      cancel_confirmation_pending: true,
+      cancel_confirmation_requested_at: new Date().toISOString(),
+    })
+    .eq('id', booking.id);
+
+  if (updateError) {
+    throw new Error(updateError.message);
+  }
+
+  const evolutionConfig = getEvolutionConfigFromProfessional(professional);
+
+  await sendWhatsAppMessage(
+    normalizePhone(phone) || phone,
+    `Recebemos seu pedido de cancelamento.
+
+Agendamento:
+Barbearia: ${barbershop?.name || 'nossa barbearia'}
+Serviço: ${service?.name || 'Serviço'}
+Data: ${formatDateBR(booking?.booking_date)}
+Hora: ${booking?.start_time}
+
+Se você realmente deseja cancelar, responda:
+sim
+
+Se não quiser cancelar mais, responda:
+não`,
+    evolutionConfig
+  );
+
+  return { ok: true, booking };
+}
+
+async function confirmBookingCancellationByCustomerWhatsapp(phone: string) {
+  const booking = await findNextBookingPendingCancellationByCustomerWhatsapp(phone);
 
   if (!booking) {
     return { ok: false, reason: 'not-found' as const };
@@ -238,8 +333,10 @@ async function cancelBookingByCustomerWhatsapp(phone: string) {
     .update({
       status: 'cancelled',
       cancelled_at: new Date().toISOString(),
-      cancellation_reason: 'Cancelado pelo cliente via WhatsApp',
+      cancellation_reason: 'Cancelado pelo cliente via WhatsApp com confirmação',
       cancelled_by_customer_via_whatsapp: true,
+      cancel_confirmation_pending: false,
+      cancel_confirmation_requested_at: null,
     })
     .eq('id', booking.id);
 
@@ -285,13 +382,51 @@ Serviço: ${service?.name || 'Serviço'}
 Data: ${formatDateBR(booking?.booking_date)}
 Hora: ${booking?.start_time}
 
-O cliente cancelou pelo WhatsApp e o horário já foi liberado.`,
+O cliente cancelou pelo WhatsApp e confirmou o cancelamento.`,
         evolutionConfig
       );
     } catch (err) {
       console.error('Erro ao avisar barbeiro sobre cancelamento automático:', err);
     }
   }
+
+  return { ok: true, booking };
+}
+
+async function cancelPendingCancellationRequestByCustomerWhatsapp(phone: string) {
+  const booking = await findNextBookingPendingCancellationByCustomerWhatsapp(phone);
+
+  if (!booking) {
+    return { ok: false, reason: 'not-found' as const };
+  }
+
+  const professional = getRelationItem<{
+    name?: string;
+    evolution_enabled?: boolean;
+    evolution_api_url?: string;
+    evolution_instance?: string;
+    evolution_api_key?: string;
+  }>(booking?.professional);
+
+  const evolutionConfig = getEvolutionConfigFromProfessional(professional);
+
+  const { error: updateError } = await supabaseAdmin
+    .from('bookings')
+    .update({
+      cancel_confirmation_pending: false,
+      cancel_confirmation_requested_at: null,
+    })
+    .eq('id', booking.id);
+
+  if (updateError) {
+    throw new Error(updateError.message);
+  }
+
+  await sendWhatsAppMessage(
+    normalizePhone(phone) || phone,
+    `Tudo certo. Seu agendamento continua confirmado.`,
+    evolutionConfig
+  );
 
   return { ok: true, booking };
 }
@@ -362,9 +497,26 @@ export async function POST(req: Request) {
     }
 
     if (text === 'cancelar') {
-      const customerCancellation = await cancelBookingByCustomerWhatsapp(senderNumber);
-      if (customerCancellation.ok) {
-        return NextResponse.json({ ok: true, action: 'customer-cancelled' });
+      const customerCancellationRequest = await requestBookingCancellationByCustomerWhatsapp(senderNumber);
+
+      if (customerCancellationRequest.ok) {
+        return NextResponse.json({ ok: true, action: 'customer-cancel-requested' });
+      }
+    }
+
+    if (text === 'sim') {
+      const confirmedCancellation = await confirmBookingCancellationByCustomerWhatsapp(senderNumber);
+
+      if (confirmedCancellation.ok) {
+        return NextResponse.json({ ok: true, action: 'customer-cancel-confirmed' });
+      }
+    }
+
+    if (text === 'não' || text === 'nao') {
+      const cancelledRequest = await cancelPendingCancellationRequestByCustomerWhatsapp(senderNumber);
+
+      if (cancelledRequest.ok) {
+        return NextResponse.json({ ok: true, action: 'customer-cancel-aborted' });
       }
     }
 
@@ -451,6 +603,8 @@ Use:
           status: 'cancelled',
           cancelled_at: new Date().toISOString(),
           cancellation_reason: 'Cancelado pelo barbeiro via WhatsApp',
+          cancel_confirmation_pending: false,
+          cancel_confirmation_requested_at: null,
         })
         .eq('id', booking.id);
 

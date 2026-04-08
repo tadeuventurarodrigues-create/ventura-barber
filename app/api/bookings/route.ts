@@ -189,6 +189,7 @@ export async function POST(req: Request) {
         price: bookingPrice,
         customer_name,
         customer_whatsapp: normalizedCustomerWhatsapp,
+        cancel_confirmation_pending: false,
       })
       .select('*')
       .single();
@@ -256,7 +257,10 @@ Profissional: ${professional.name}
 Data: ${formatDateBR(booking_date)}
 Hora: ${start_time}
 
-Qualquer dúvida, responda esta mensagem.`,
+Para cancelar este agendamento a qualquer momento, responda:
+cancelar
+
+Se você solicitar o cancelamento, nós vamos pedir uma confirmação final antes de cancelar.`,
         barberEvolutionConfig
       );
     } catch (error) {

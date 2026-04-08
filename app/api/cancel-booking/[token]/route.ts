@@ -31,9 +31,13 @@ function firstItem<T>(value: T | T[] | null | undefined): T | null {
   return value || null;
 }
 
-export async function GET(_: Request, { params }: { params: { token: string } }) {
+type RouteContext = {
+  params: Promise<{ token: string }>;
+};
+
+export async function GET(_: Request, context: RouteContext) {
   try {
-    const token = params.token;
+    const { token } = await context.params;
 
     const { data: booking, error } = await supabaseAdmin
       .from('bookings')
@@ -70,9 +74,9 @@ export async function GET(_: Request, { params }: { params: { token: string } })
   }
 }
 
-export async function POST(_: Request, { params }: { params: { token: string } }) {
+export async function POST(_: Request, context: RouteContext) {
   try {
-    const token = params.token;
+    const { token } = await context.params;
 
     const { data: booking, error } = await supabaseAdmin
       .from('bookings')

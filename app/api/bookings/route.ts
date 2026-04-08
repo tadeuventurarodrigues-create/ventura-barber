@@ -267,7 +267,11 @@ Se você solicitar o cancelamento, nós vamos pedir uma confirmação final ante
       console.error('Erro ao enviar confirmação ao cliente:', error);
     }
 
-    if (loyalty?.enabled && loyalty.visits_required && customerTotalBookings >= Number(loyalty.visits_required)) {
+    if (
+      loyalty?.enabled &&
+      loyalty.visits_required &&
+      customerTotalBookings >= Number(loyalty.visits_required)
+    ) {
       try {
         await sendWhatsAppMessage(
           normalizedCustomerWhatsapp,

@@ -7,7 +7,7 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 const APP_TIMEZONE = 'America/Fortaleza';
-const BUILD_TAG = 'jobs-v3';
+const BUILD_TAG = 'jobs-v4';
 
 function formatDateBR(value: string) {
   if (!value) return value;
@@ -56,7 +56,6 @@ function toLocalComparableMinutes(dateStr: string, timeStr: string) {
     .split(':')
     .map(Number);
 
-  // número absoluto em minutos, sem depender do timezone do servidor
   const dayKey = year * 372 + month * 31 + day;
   return dayKey * 1440 + (hour || 0) * 60 + (minute || 0);
 }
@@ -196,10 +195,7 @@ Data: ${formatDateBR(booking.booking_date)}
 Hora: ${booking.start_time}
 
 Se deseja cancelar, responda:
-cancelar
-
-Se deseja remarcar, responda:
-remarcar`;
+cancelar`;
 
       try {
         await sendWhatsAppMessage(customerPhone, message, evolutionConfig);

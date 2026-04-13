@@ -29,6 +29,12 @@ export default async function ShopPage() {
     .eq('barbershop_id', profile.barbershop_id)
     .order('created_at', { ascending: true });
 
+  const servicesRes = await supabaseAdmin
+    .from('services')
+    .select('id, barbershop_id, name, description, price, duration_minutes, is_active')
+    .eq('barbershop_id', profile.barbershop_id)
+    .order('created_at', { ascending: true });
+
   const bookingsBaseQuery = supabaseAdmin
     .from('bookings')
     .select(`
@@ -104,21 +110,6 @@ export default async function ShopPage() {
       ? await workingHoursBaseQuery
       : await workingHoursBaseQuery.eq('professional_id', profile.professional_id);
 
-  const autoReplyProfessionalRes = profile.professional_id
-    ? await supabaseAdmin
-        .from('professionals')
-        .select(
-          'id, auto_reply_enabled, auto_reply_message, whatsapp_number, evolution_enabled, evolution_instance'
-        )
-        .eq('id', profile.professional_id)
-        .maybeSingle()
-    : { data: null };
-
-  const appUrl = String(process.env.NEXT_PUBLIC_APP_URL || '').replace(/\/+$/, '');
-  const defaultAutoReplyMessage = appUrl
-    ? `Olá! Para agendar seu horário online, acesse: ${appUrl}/${barbershop.slug}`
-    : `Olá! Para agendar seu horário online, acesse nosso link de agendamento.`;
-
   const fullProfile = {
     id: profile.id,
     name: profile.name ?? null,
@@ -138,18 +129,7 @@ export default async function ShopPage() {
           professionals={professionalsRes.data || []}
           bookings={bookings}
           workingHours={workingHoursRes.data || []}
-          autoReplyConfig={
-            autoReplyProfessionalRes.data
-              ? {
-                  enabled: Boolean(autoReplyProfessionalRes.data.auto_reply_enabled),
-                  message:
-                    autoReplyProfessionalRes.data.auto_reply_message || defaultAutoReplyMessage,
-                  whatsapp_number: autoReplyProfessionalRes.data.whatsapp_number || '',
-                  evolution_enabled: Boolean(autoReplyProfessionalRes.data.evolution_enabled),
-                  evolution_instance: autoReplyProfessionalRes.data.evolution_instance || '',
-                }
-              : null
-          }
+          services={servicesRes.data || []}
         />
       </section>
     </main>

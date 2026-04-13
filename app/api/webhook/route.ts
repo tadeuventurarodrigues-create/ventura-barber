@@ -45,6 +45,33 @@ function extractRemoteJid(payload: any) {
   );
 }
 
+function extractInstanceName(payload: any) {
+  return String(
+    payload?.instance ||
+      payload?.instanceName ||
+      payload?.instance_name ||
+      payload?.data?.instance ||
+      payload?.data?.instanceName ||
+      payload?.data?.instance_name ||
+      payload?.senderData?.instance ||
+      ''
+  ).trim();
+}
+
+function extractSenderPushName(payload: any) {
+  return String(
+    payload?.data?.pushName ||
+      payload?.pushName ||
+      payload?.senderPushName ||
+      payload?.data?.sender?.pushName ||
+      ''
+  ).trim();
+}
+
+function extractCurrentAppUrl() {
+  return String(process.env.NEXT_PUBLIC_APP_URL || '').trim().replace(/\/+$/, '');
+}
+
 function extractFromMe(payload: any) {
   return Boolean(
     payload?.data?.key?.fromMe ??
@@ -226,13 +253,146 @@ async function findProfessionalByWhatsapp(phone: string) {
       evolution_api_key,
       barbershops (
         id,
-        name
+        name,
+        slug
       )
     `)
     .in('whatsapp_number', candidates)
     .maybeSingle();
 
   return data || null;
+}
+
+
+async function findProfessionalByEvolutionInstance(instanceName: string) {
+  const cleanInstance = String(instanceName || '').trim();
+  if (!cleanInstance) return null;
+
+  const { data } = await supabaseAdmin
+    .from('professionals')
+    .select(`
+      id,
+      name,
+      barbershop_id,
+      whatsapp_number,
+      evolution_enabled,
+      evolution_api_url,
+      evolution_instance,
+      evolution_api_key,
+      auto_reply_enabled,
+      auto_reply_message,
+      barbershops (
+        id,
+        name,
+        slug
+      )
+    `)
+    .eq('evolution_instance', cleanInstance)
+    .maybeSingle();
+
+  return data || null;
+}
+
+function buildAutoReplyMessage(professional: any, senderName: string) {
+  const custom = String(professional?.auto_reply_message || '').trim();
+  if (custom) return custom;
+
+  const barbershop = getRelationItem<{ name?: string; slug?: string }>(professional?.barbershops);
+  const appUrl = extractCurrentAppUrl();
+  const bookingLink = appUrl && barbershop?.slug ? `${appUrl}/${barbershop.slug}` : '';
+  const greetingName = senderName || 'cliente';
+
+  if (bookingLink) {
+    return `Olá, ${greetingName}! Para agendar seu horário online, acesse: ${bookingLink}`;
+  }
+
+  return `Olá, ${greetingName}! Para agendar seu horário online, fale com a barbearia.`;
+}
+
+async function shouldSendAutoReply(professionalId: string, customerPhone: string) {
+  const normalizedPhone = normalizePhone(customerPhone || '');
+  if (!professionalId || !normalizedPhone) return false;
+
+  const { data, error } = await supabaseAdmin
+    .from('whatsapp_auto_reply_logs')
+    .select('last_sent_at')
+    .eq('professional_id', professionalId)
+    .eq('customer_phone', normalizedPhone)
+    .maybeSingle();
+
+  if (error && error.code !== 'PGRST116') {
+    console.error('Erro ao consultar trava da resposta automática:', error);
+    return false;
+  }
+
+  if (!data?.last_sent_at) return true;
+
+  const lastSent = new Date(data.last_sent_at).getTime();
+  if (Number.isNaN(lastSent)) return true;
+
+  return Date.now() - lastSent >= 24 * 60 * 60 * 1000;
+}
+
+async function registerAutoReplySent(professional: any, customerPhone: string, remoteJid: string) {
+  const normalizedPhone = normalizePhone(customerPhone || '');
+  if (!professional?.id || !professional?.barbershop_id || !normalizedPhone) return;
+
+  const payload = {
+    professional_id: professional.id,
+    barbershop_id: professional.barbershop_id,
+    customer_phone: normalizedPhone,
+    customer_jid: remoteJid || null,
+    last_sent_at: new Date().toISOString(),
+  };
+
+  const { error } = await supabaseAdmin
+    .from('whatsapp_auto_reply_logs')
+    .upsert(payload, { onConflict: 'professional_id,customer_phone' });
+
+  if (error) {
+    console.error('Erro ao registrar resposta automática enviada:', error);
+  }
+}
+
+async function tryHandleInboundAutoReply(payload: any, senderNumber: string, remoteJid: string, senderName: string) {
+  const instanceName = extractInstanceName(payload);
+  if (!instanceName) {
+    return { handled: false, reason: 'missing-instance' as const };
+  }
+
+  const professional = await findProfessionalByEvolutionInstance(instanceName);
+  if (!professional) {
+    return { handled: false, reason: 'professional-not-found' as const };
+  }
+
+  const professionalPhone = normalizePhone(professional?.whatsapp_number || '');
+  if (professionalPhone && professionalPhone === normalizePhone(senderNumber || '')) {
+    return { handled: false, reason: 'barber-message' as const, professional };
+  }
+
+  if (!professional?.auto_reply_enabled) {
+    return { handled: false, reason: 'auto-reply-disabled' as const, professional };
+  }
+
+  if (!professional?.evolution_enabled) {
+    return { handled: false, reason: 'evolution-disabled' as const, professional };
+  }
+
+  const canSend = await shouldSendAutoReply(professional.id, senderNumber);
+  if (!canSend) {
+    return { handled: true, action: 'auto-reply-cooldown' as const, professional };
+  }
+
+  const evolutionConfig = getEvolutionConfigFromProfessional(professional);
+  if (!evolutionConfig) {
+    return { handled: false, reason: 'missing-evolution-config' as const, professional };
+  }
+
+  const message = buildAutoReplyMessage(professional, senderName);
+  await sendWhatsAppMessage(senderNumber, message, evolutionConfig);
+  await registerAutoReplySent(professional, senderNumber, remoteJid);
+
+  return { handled: true, action: 'auto-reply-sent' as const, professional };
 }
 
 async function getBookingsText(professionalId: string, bookingDate: string, title: string) {
@@ -888,6 +1048,8 @@ export async function POST(req: Request) {
     const fromMe = extractFromMe(payload);
     const senderJid = extractSenderJid(payload);
     const remoteJid = extractRemoteJid(payload);
+    const instanceName = extractInstanceName(payload);
+    const senderPushName = extractSenderPushName(payload);
     const rawText = extractText(payload);
     const normalizedText = normalizeText(rawText);
 
@@ -898,6 +1060,8 @@ export async function POST(req: Request) {
       rawText,
       normalizedText,
       event: payload?.event,
+      instanceName,
+      senderPushName,
     });
 
     if (fromMe) {
@@ -913,6 +1077,7 @@ export async function POST(req: Request) {
     console.log('WEBHOOK_NORMALIZED:', {
       senderJid,
       remoteJid,
+      instanceName,
       senderNumber,
       text: normalizedText,
       phoneCandidates: buildPhoneCandidates(senderJid),
@@ -1019,6 +1184,21 @@ export async function POST(req: Request) {
         reason: 'Nenhum pedido de cancelamento pendente encontrado para este número.',
         senderNumber,
         remoteJid,
+      });
+    }
+
+    const inboundAutoReply = await tryHandleInboundAutoReply(
+      payload,
+      senderNumber,
+      remoteJid,
+      senderPushName
+    );
+
+    if (inboundAutoReply.handled) {
+      return NextResponse.json({
+        ok: true,
+        action: inboundAutoReply.action,
+        instanceName,
       });
     }
 

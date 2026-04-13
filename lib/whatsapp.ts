@@ -1,71 +1,47 @@
-import { normalizePhone } from '@/lib/phone';
+const EVOLUTION_API_URL = process.env.EVOLUTION_API_URL!;
+const EVOLUTION_API_KEY = process.env.EVOLUTION_API_KEY!;
+const EVOLUTION_INSTANCE = process.env.EVOLUTION_INSTANCE!;
 
-type EvolutionConfig = {
-  apiUrl?: string | null;
-  instance?: string | null;
-  apiKey?: string | null;
-};
+async function setUnavailablePresence() {
+  try {
+    if (process.env.EVOLUTION_SET_UNAVAILABLE_AFTER_SEND !== "true") return;
 
-function getDefaultEvolutionConfig(): EvolutionConfig {
-  return {
-    apiUrl: process.env.EVOLUTION_API_URL || '',
-    instance: process.env.EVOLUTION_INSTANCE || '',
-    apiKey: process.env.EVOLUTION_API_KEY || '',
-  };
+    await fetch(`${EVOLUTION_API_URL}/instance/setPresence/${EVOLUTION_INSTANCE}`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        apikey: EVOLUTION_API_KEY,
+      },
+      body: JSON.stringify({
+        presence: "unavailable",
+      }),
+    });
+  } catch (error) {
+    console.log("Erro ao setar presence:", error);
+  }
 }
 
-function resolveEvolutionConfig(config?: EvolutionConfig | null): EvolutionConfig {
-  const fallback = getDefaultEvolutionConfig();
+export async function sendWhatsappMessage(to: string, message: string) {
+  try {
+    const res = await fetch(`${EVOLUTION_API_URL}/message/sendText/${EVOLUTION_INSTANCE}`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        apikey: EVOLUTION_API_KEY,
+      },
+      body: JSON.stringify({
+        number: to,
+        text: message,
+      }),
+    });
 
-  return {
-    apiUrl: String(config?.apiUrl || fallback.apiUrl || '').trim().replace(/\/+$/, ''),
-    instance: String(config?.instance || fallback.instance || '').trim(),
-    apiKey: String(config?.apiKey || fallback.apiKey || '').trim(),
-  };
-}
+    const data = await res.json();
 
-export async function sendWhatsAppMessage(
-  to: string,
-  message: unknown,
-  config?: EvolutionConfig | null
-) {
-  const cleanNumber = normalizePhone(to);
+    // 🔥 AQUI É A MÁGICA
+    await setUnavailablePresence();
 
-  if (!cleanNumber) {
-    throw new Error('Número de WhatsApp inválido.');
+    return data;
+  } catch (error) {
+    console.error("Erro ao enviar mensagem:", error);
   }
-
-  const finalMessage = typeof message === 'string' ? message.trim() : JSON.stringify(message ?? '');
-
-  if (!finalMessage) {
-    throw new Error('Mensagem de WhatsApp vazia ou inválida.');
-  }
-
-  const evolution = resolveEvolutionConfig(config);
-
-  if (!evolution.apiUrl || !evolution.instance || !evolution.apiKey) {
-    throw new Error('Configuração da Evolution não encontrada.');
-  }
-
-  const url = `${evolution.apiUrl}/message/sendText/${evolution.instance}`;
-
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      apikey: evolution.apiKey,
-    },
-    body: JSON.stringify({
-      number: cleanNumber,
-      text: finalMessage,
-    }),
-  });
-
-  const text = await response.text();
-
-  if (!response.ok) {
-    throw new Error(`Evolution retornou ${response.status}: ${text}`);
-  }
-
-  console.log('WA status', response.status, text);
 }

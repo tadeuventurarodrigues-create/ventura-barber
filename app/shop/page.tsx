@@ -29,6 +29,12 @@ export default async function ShopPage() {
     .eq('barbershop_id', profile.barbershop_id)
     .order('created_at', { ascending: true });
 
+  const servicesRes = await supabaseAdmin
+    .from('services')
+    .select('id, barbershop_id, name, description, price, duration_minutes, is_active')
+    .eq('barbershop_id', profile.barbershop_id)
+    .order('created_at', { ascending: true });
+
   const bookingsBaseQuery = supabaseAdmin
     .from('bookings')
     .select(`
@@ -123,6 +129,7 @@ export default async function ShopPage() {
           professionals={professionalsRes.data || []}
           bookings={bookings}
           workingHours={workingHoursRes.data || []}
+          services={servicesRes.data || []}
         />
       </section>
     </main>

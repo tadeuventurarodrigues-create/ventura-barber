@@ -21,13 +21,26 @@ async function setUnavailablePresence() {
   }
 }
 
-export async function sendWhatsappMessage(to: string, message: string) {
+// 🔥 NOME CORRETO AQUI (IMPORTANTE)
+export async function sendWhatsAppMessage(
+  to: string,
+  message: string,
+  customConfig?: {
+    apiUrl: string;
+    instance: string;
+    apiKey: string;
+  }
+) {
   try {
-    const res = await fetch(`${EVOLUTION_API_URL}/message/sendText/${EVOLUTION_INSTANCE}`, {
+    const apiUrl = customConfig?.apiUrl || EVOLUTION_API_URL;
+    const instance = customConfig?.instance || EVOLUTION_INSTANCE;
+    const apiKey = customConfig?.apiKey || EVOLUTION_API_KEY;
+
+    const res = await fetch(`${apiUrl}/message/sendText/${instance}`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        apikey: EVOLUTION_API_KEY,
+        apikey: apiKey,
       },
       body: JSON.stringify({
         number: to,
@@ -37,7 +50,7 @@ export async function sendWhatsappMessage(to: string, message: string) {
 
     const data = await res.json();
 
-    // 🔥 AQUI É A MÁGICA
+    // 🔥 ESSENCIAL PRA VOLTAR NOTIFICAÇÃO
     await setUnavailablePresence();
 
     return data;

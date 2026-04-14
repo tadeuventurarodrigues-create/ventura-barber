@@ -2,15 +2,25 @@ const EVOLUTION_API_URL = process.env.EVOLUTION_API_URL!;
 const EVOLUTION_API_KEY = process.env.EVOLUTION_API_KEY!;
 const EVOLUTION_INSTANCE = process.env.EVOLUTION_INSTANCE!;
 
-async function setUnavailablePresence() {
+type EvolutionConfig = {
+  apiUrl: string;
+  instance: string;
+  apiKey: string;
+};
+
+async function setUnavailablePresence(customConfig?: EvolutionConfig | null) {
   try {
     if (process.env.EVOLUTION_SET_UNAVAILABLE_AFTER_SEND !== "true") return;
 
-    await fetch(`${EVOLUTION_API_URL}/instance/setPresence/${EVOLUTION_INSTANCE}`, {
+    const apiUrl = customConfig?.apiUrl || EVOLUTION_API_URL;
+    const instance = customConfig?.instance || EVOLUTION_INSTANCE;
+    const apiKey = customConfig?.apiKey || EVOLUTION_API_KEY;
+
+    await fetch(`${apiUrl}/instance/setPresence/${instance}`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        apikey: EVOLUTION_API_KEY,
+        apikey: apiKey,
       },
       body: JSON.stringify({
         presence: "unavailable",
@@ -21,15 +31,10 @@ async function setUnavailablePresence() {
   }
 }
 
-// 🔥 NOME CORRETO AQUI (IMPORTANTE)
 export async function sendWhatsAppMessage(
   to: string,
   message: string,
-  customConfig?: {
-    apiUrl: string;
-    instance: string;
-    apiKey: string;
-  }
+  customConfig?: EvolutionConfig | null
 ) {
   try {
     const apiUrl = customConfig?.apiUrl || EVOLUTION_API_URL;
@@ -50,8 +55,7 @@ export async function sendWhatsAppMessage(
 
     const data = await res.json();
 
-    // 🔥 ESSENCIAL PRA VOLTAR NOTIFICAÇÃO
-    await setUnavailablePresence();
+    await setUnavailablePresence(customConfig);
 
     return data;
   } catch (error) {

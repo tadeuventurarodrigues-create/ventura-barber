@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { BarberProductsPanel } from './barber-products-panel';
 
 type Barbershop = {
   id?: string;
@@ -278,6 +279,32 @@ export function AdminDashboard({
       </section>
 
       {message ? <p className="text-sm text-emerald-300">{message}</p> : null}
+
+      {/* Shopping do Barbeiro — Admin */}
+      <section className="panel p-6">
+        <div className="mb-4">
+          <h2 className="text-2xl font-bold" style={{
+            background: 'linear-gradient(90deg, #c49b63, #f0c97a)',
+            WebkitBackgroundClip: 'text',
+            WebkitTextFillColor: 'transparent',
+            backgroundClip: 'text',
+          }}>
+            🛒 Shopping do Barbeiro
+          </h2>
+          <p className="text-sm text-white/60 mt-1">
+            Gerencie todos os produtos de todas as barbearias.
+          </p>
+        </div>
+
+        {!initialBarbershop?.id ? (
+          <p className="text-white/45 text-sm">Nenhuma barbearia configurada.</p>
+        ) : (
+          <BarberProductsPanel
+            barbershopId={initialBarbershop.id}
+            title="Gerenciar Produtos"
+          />
+        )}
+      </section>
 
       {credentials ? (
         <div className="panel p-6">

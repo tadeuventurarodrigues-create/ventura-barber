@@ -119,10 +119,7 @@ export async function POST(req: Request) {
       .single();
 
     if (shopResult.error || !shopResult.data) {
-      return NextResponse.json(
-        { error: shopResult.error?.message || 'Erro ao criar barbearia.' },
-        { status: 500 }
-      );
+      return NextResponse.json({ error: shopResult.error?.message || 'Erro ao criar barbearia.' }, { status: 500 });
     }
 
     const barbershop = shopResult.data;
@@ -140,10 +137,7 @@ export async function POST(req: Request) {
 
     if (managerAuth.error || !managerAuth.data.user) {
       await supabaseAdmin.from('barbershops').delete().eq('id', barbershop.id);
-      return NextResponse.json(
-        { error: managerAuth.error?.message || 'Erro ao criar login da barbearia.' },
-        { status: 500 }
-      );
+      return NextResponse.json({ error: managerAuth.error?.message || 'Erro ao criar login da barbearia.' }, { status: 500 });
     }
 
     const managerProfile = await supabaseAdmin
@@ -165,8 +159,8 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'Erro ao criar perfil da barbearia.' }, { status: 500 });
     }
 
-    let createdProfessional: any = null;
-    let createdBarberProfile: any = null;
+    let createdProfessional = null;
+    let createdBarberProfile = null;
 
     if (barber?.name && barber?.email && barber?.password) {
       const barberName = clean(barber.name);
@@ -287,10 +281,8 @@ export async function POST(req: Request) {
             weekday: Number(item.weekday),
             start_time: item.enabled ? clean(item.start_time) || '08:00' : '00:00',
             end_time: item.enabled ? clean(item.end_time) || '18:00' : '00:00',
-            break_start_time:
-              item.enabled && clean(item.break_start_time) ? clean(item.break_start_time) : null,
-            break_end_time:
-              item.enabled && clean(item.break_end_time) ? clean(item.break_end_time) : null,
+            break_start_time: item.enabled && clean(item.break_start_time) ? clean(item.break_start_time) : null,
+            break_end_time: item.enabled && clean(item.break_end_time) ? clean(item.break_end_time) : null,
             slot_interval_minutes: Number(item.slot_interval_minutes || 30),
             is_active: Boolean(item.enabled),
           }));
@@ -301,7 +293,7 @@ export async function POST(req: Request) {
       }
     }
 
-    let createdService: any = null;
+    let createdService = null;
     if (firstService?.name) {
       const serviceName = clean(firstService.name);
       const servicePrice = Number(firstService.price || 0);

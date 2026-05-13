@@ -1,6 +1,8 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import { BarberProductsPanel } from './barber-products-panel';
+import { BarberDashboard } from './barber-dashboard';
 
 type Profile = {
   id: string;
@@ -20,16 +22,6 @@ type Barbershop = {
 type Professional = {
   id: string;
   name: string;
-};
-
-type Service = {
-  id: string;
-  barbershop_id: string;
-  name: string;
-  description?: string | null;
-  price: number;
-  duration_minutes: number;
-  is_active?: boolean | null;
 };
 
 type Booking = {
@@ -127,24 +119,21 @@ export function ShopDashboard({
   professionals,
   bookings,
   workingHours = [],
-  services = [],
+  currentProfessional,
 }: {
   profile: Profile;
   barbershop: Barbershop;
   professionals: Professional[];
   bookings: Booking[];
   workingHours?: WorkingHour[];
-  services?: Service[];
+  currentProfessional?: { id: string; name: string; description?: string | null; photo_url?: string | null; specialty?: string | null; whatsapp_number?: string | null } | null;
 }) {
   const [message, setMessage] = useState('');
 
   const [items, setItems] = useState<Booking[]>(bookings);
   const [hoursItems, setHoursItems] = useState<WorkingHour[]>(workingHours);
-  const [serviceItems, setServiceItems] = useState<Service[]>(services);
 
   const [loadingBookingId, setLoadingBookingId] = useState<string | null>(null);
-  const [servicesLoading, setServicesLoading] = useState(false);
-  const [editingServiceId, setEditingServiceId] = useState<string | null>(null);
 
   const [cancelModalBooking, setCancelModalBooking] = useState<Booking | null>(null);
   const [cancelReason, setCancelReason] = useState('Cancelado pela barbearia');
@@ -166,14 +155,6 @@ export function ShopDashboard({
     is_active: true,
   });
 
-  const [serviceForm, setServiceForm] = useState({
-    name: '',
-    description: '',
-    price: '',
-    duration_minutes: '30',
-    is_active: true,
-  });
-
   const [agendaFilter, setAgendaFilter] = useState<'today' | 'tomorrow' | 'custom'>('today');
   const [customDate, setCustomDate] = useState(todayIso());
 
@@ -184,10 +165,6 @@ export function ShopDashboard({
   useEffect(() => {
     setHoursItems(workingHours);
   }, [workingHours]);
-
-  useEffect(() => {
-    setServiceItems(services);
-  }, [services]);
 
   useEffect(() => {
     if (profile.role === 'shop_barber' && profile.professional_id) {
@@ -243,116 +220,6 @@ export function ShopDashboard({
     setItems((current) =>
       current.map((item) => (item.id === bookingId ? updater(item) : item))
     );
-  }
-
-  function resetServiceForm() {
-    setEditingServiceId(null);
-    setServiceForm({
-      name: '',
-      description: '',
-      price: '',
-      duration_minutes: '30',
-      is_active: true,
-    });
-  }
-
-  function editService(service: Service) {
-    setEditingServiceId(service.id);
-    setServiceForm({
-      name: service.name || '',
-      description: service.description || '',
-      price: String(Number(service.price || 0)).replace('.', ','),
-      duration_minutes: String(service.duration_minutes || 30),
-      is_active: service.is_active !== false,
-    });
-    setMessage('');
-  }
-
-  async function saveService(e: React.FormEvent) {
-    e.preventDefault();
-    setServicesLoading(true);
-    setMessage('');
-
-    try {
-      const payload = {
-        id: editingServiceId || undefined,
-        barbershop_id: barbershop.id,
-        name: serviceForm.name,
-        description: serviceForm.description,
-        price: serviceForm.price,
-        duration_minutes: Number(serviceForm.duration_minutes || 0),
-        is_active: serviceForm.is_active,
-      };
-
-      const res = await fetch('/api/admin/services', {
-        method: editingServiceId ? 'PUT' : 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-
-      const data = await res.json();
-
-      if (!res.ok) {
-        setMessage(data.error || 'Erro ao salvar serviço.');
-        setServicesLoading(false);
-        return;
-      }
-
-      const saved: Service | undefined = data.service;
-      if (saved) {
-        setServiceItems((current) => {
-          const exists = current.some((item) => item.id === saved.id);
-          if (exists) {
-            return current.map((item) => (item.id === saved.id ? saved : item));
-          }
-          return [...current, saved];
-        });
-      }
-
-      setMessage(data.message || 'Serviço salvo com sucesso.');
-      resetServiceForm();
-    } catch {
-      setMessage('Erro ao salvar serviço.');
-    } finally {
-      setServicesLoading(false);
-    }
-  }
-
-  async function removeService(service: Service) {
-    const confirmed = window.confirm(
-      `Excluir o serviço \"${service.name}\"? Se ele já tiver agendamentos, o sistema vai impedir a exclusão.`
-    );
-
-    if (!confirmed) return;
-
-    setServicesLoading(true);
-    setMessage('');
-
-    try {
-      const res = await fetch('/api/admin/services', {
-        method: 'DELETE',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: service.id }),
-      });
-
-      const data = await res.json();
-
-      if (!res.ok) {
-        setMessage(data.error || 'Erro ao excluir serviço.');
-        setServicesLoading(false);
-        return;
-      }
-
-      setServiceItems((current) => current.filter((item) => item.id !== service.id));
-      if (editingServiceId === service.id) {
-        resetServiceForm();
-      }
-      setMessage(data.message || 'Serviço excluído com sucesso.');
-    } catch {
-      setMessage('Erro ao excluir serviço.');
-    } finally {
-      setServicesLoading(false);
-    }
   }
 
   async function confirmCancelBooking() {
@@ -584,12 +451,57 @@ export function ShopDashboard({
     });
   }, [hoursItems, profile]);
 
-  const visibleServices = useMemo(() => {
-    return [...serviceItems].sort((a, b) => a.name.localeCompare(b.name));
-  }, [serviceItems]);
-
   function getProfessionalName(professionalId: string) {
     return professionals.find((p) => p.id === professionalId)?.name || 'Barbeiro';
+  }
+
+  // ── Barbeiro: usa o painel novo completo ──
+  const isBarber = profile.role === 'shop_barber';
+
+  // Monta dados para o BarberDashboard independente de currentProfessional
+  const barberProfessional = currentProfessional ?? {
+    id: profile.professional_id || profile.id,
+    name: profile.name || 'Barbeiro',
+    description: null,
+    photo_url: null,
+    specialty: null,
+    whatsapp_number: null,
+  };
+
+  const barberBookings = items
+    .filter((b) => !profile.professional_id || b.professional_id === profile.professional_id)
+    .map((b) => ({
+      id: b.id,
+      daily_order_number: b.daily_order_number ?? 0,
+      booking_date: b.booking_date,
+      start_time: b.start_time,
+      end_time: b.end_time ?? undefined,
+      status: b.status,
+      customer_name: b.customer_name,
+      service_name: b.service?.name ?? b.service_name ?? '',
+      price: b.price ?? 0,
+    }));
+
+  const barberSummary = {
+    customers: totalClients,
+    revenue: totalRevenue,
+    bookings: visibleBookingsBase.length,
+  };
+
+  // Sempre usa o novo painel
+  if (true) {
+    return (
+      <div>
+
+        <BarberDashboard
+          professional={barberProfessional}
+          barbershopSlug={barbershop.slug}
+          barbershopId={barbershop.id}
+          bookings={barberBookings}
+          summary={barberSummary}
+        />
+      </div>
+    );
   }
 
   return (
@@ -702,7 +614,9 @@ export function ShopDashboard({
                       <div className="text-sm text-white/70">
                         Valor: {formatMoney(Number(booking.price || 0))}
                       </div>
-                      <div className="text-sm text-white/70">Status: {booking.status}</div>
+                      <div className="text-sm text-white/70">
+                        Status: {booking.status}
+                      </div>
                     </div>
 
                     {canManageBooking(booking) ? (
@@ -805,165 +719,6 @@ export function ShopDashboard({
             })}
           </div>
         )}
-      </section>
-
-      <section className="grid gap-6 lg:grid-cols-2">
-        <div className="panel p-6">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <h3 className="text-2xl font-bold">Serviços</h3>
-              <p className="mt-1 text-sm text-white/70">
-                {profile.role === 'shop_barber'
-                  ? 'Aqui você pode adicionar, editar, desativar ou excluir serviços da sua barbearia.'
-                  : 'Gerencie os serviços disponíveis na barbearia.'}
-              </p>
-            </div>
-
-            {editingServiceId ? (
-              <button type="button" className="btn btn-dark" onClick={resetServiceForm}>
-                Novo serviço
-              </button>
-            ) : null}
-          </div>
-
-          <form className="mt-5 space-y-4" onSubmit={saveService}>
-            <div>
-              <label className="mb-2 block text-sm text-white/70">Nome do serviço</label>
-              <input
-                className="field"
-                value={serviceForm.name}
-                onChange={(e) => setServiceForm((prev) => ({ ...prev, name: e.target.value }))}
-                placeholder="Ex: Corte degradê"
-                required
-              />
-            </div>
-
-            <div>
-              <label className="mb-2 block text-sm text-white/70">Descrição</label>
-              <textarea
-                className="field min-h-[100px]"
-                value={serviceForm.description}
-                onChange={(e) =>
-                  setServiceForm((prev) => ({ ...prev, description: e.target.value }))
-                }
-                placeholder="Detalhes do serviço"
-              />
-            </div>
-
-            <div className="grid gap-4 md:grid-cols-2">
-              <div>
-                <label className="mb-2 block text-sm text-white/70">Valor</label>
-                <input
-                  className="field"
-                  value={serviceForm.price}
-                  onChange={(e) => setServiceForm((prev) => ({ ...prev, price: e.target.value }))}
-                  placeholder="Ex: 35,00"
-                  required
-                />
-              </div>
-
-              <div>
-                <label className="mb-2 block text-sm text-white/70">Duração (minutos)</label>
-                <input
-                  type="number"
-                  min={5}
-                  step={5}
-                  className="field"
-                  value={serviceForm.duration_minutes}
-                  onChange={(e) =>
-                    setServiceForm((prev) => ({ ...prev, duration_minutes: e.target.value }))
-                  }
-                  required
-                />
-              </div>
-            </div>
-
-            <label className="flex items-center gap-3 text-sm text-white/80">
-              <input
-                type="checkbox"
-                checked={serviceForm.is_active}
-                onChange={(e) =>
-                  setServiceForm((prev) => ({ ...prev, is_active: e.target.checked }))
-                }
-              />
-              Serviço ativo para novos agendamentos
-            </label>
-
-            <div className="flex flex-wrap gap-3">
-              <button type="submit" className="btn btn-primary" disabled={servicesLoading}>
-                {servicesLoading
-                  ? 'Salvando...'
-                  : editingServiceId
-                    ? 'Salvar alterações'
-                    : 'Adicionar serviço'}
-              </button>
-
-              {editingServiceId ? (
-                <button
-                  type="button"
-                  className="btn btn-dark"
-                  onClick={resetServiceForm}
-                  disabled={servicesLoading}
-                >
-                  Cancelar edição
-                </button>
-              ) : null}
-            </div>
-          </form>
-        </div>
-
-        <div className="panel p-6">
-          <h3 className="text-2xl font-bold">Serviços cadastrados</h3>
-
-          <div className="mt-5 space-y-3">
-            {visibleServices.length === 0 ? (
-              <div className="rounded-2xl border border-white/10 bg-black/30 p-4 text-white/70">
-                Nenhum serviço cadastrado ainda.
-              </div>
-            ) : (
-              visibleServices.map((service) => (
-                <div key={service.id} className="rounded-2xl border border-white/10 bg-black/30 p-4">
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div className="space-y-1">
-                      <div className="font-semibold">{service.name}</div>
-                      <div className="text-sm text-white/70">
-                        Valor: {formatMoney(Number(service.price || 0))}
-                      </div>
-                      <div className="text-sm text-white/70">
-                        Duração: {service.duration_minutes || 0} min
-                      </div>
-                      <div className="text-sm text-white/70">
-                        Status: {service.is_active === false ? 'Inativo' : 'Ativo'}
-                      </div>
-                      {service.description ? (
-                        <div className="text-sm text-white/60">{service.description}</div>
-                      ) : null}
-                    </div>
-
-                    <div className="flex flex-wrap gap-2">
-                      <button
-                        type="button"
-                        className="btn btn-dark"
-                        onClick={() => editService(service)}
-                        disabled={servicesLoading}
-                      >
-                        Editar
-                      </button>
-                      <button
-                        type="button"
-                        className="btn btn-danger"
-                        onClick={() => removeService(service)}
-                        disabled={servicesLoading}
-                      >
-                        Excluir
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
-        </div>
       </section>
 
       <section className="grid gap-6 lg:grid-cols-2">
@@ -1155,6 +910,14 @@ export function ShopDashboard({
           </div>
         </div>
       ) : null}
+
+      {/* Shopping do Barbeiro */}
+      <BarberProductsPanel
+        barbershopId={barbershop.id}
+        professionalId={profile.professional_id || undefined}
+        title={profile.role === 'shop_barber' ? 'Meus Produtos — Shopping' : 'Shopping do Barbeiro — Todos os Produtos'}
+      />
+
     </div>
   );
 }

@@ -1,52 +1,25 @@
 import { NextResponse } from 'next/server';
-import { normalizePhone, onlyDigits } from '@/lib/phone';
-import { sendWhatsAppMessage } from '@/lib/whatsapp';
 import { supabaseAdmin } from '@/lib/supabase-admin';
+import { normalizePhone } from '@/lib/phone';
+import { sendWhatsAppMessage } from '@/lib/whatsapp';
 
-export const runtime = 'nodejs';
-export const dynamic = 'force-dynamic';
-
-const APP_TIMEZONE = 'America/Fortaleza';
-
-type EvolutionConfig = {
-  apiUrl: string;
-  instance: string;
-  apiKey: string;
-};
-
-function getNowPartsInTimezone(timeZone: string) {
-  const now = new Date();
-
-  const formatter = new Intl.DateTimeFormat('en-CA', {
-    timeZone,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hour12: false,
-  });
-
-  const parts = formatter.formatToParts(now);
-  const get = (type: string) => parts.find((part) => part.type === type)?.value || '00';
-
-  return {
-    year: Number(get('year')),
-    month: Number(get('month')),
-    day: Number(get('day')),
-  };
+function extractText(payload: any) {
+  return (
+    payload?.data?.message?.conversation ||
+    payload?.data?.message?.extendedTextMessage?.text ||
+    payload?.data?.message?.imageMessage?.caption ||
+    payload?.data?.message?.videoMessage?.caption ||
+    payload?.data?.body ||
+    ''
+  );
 }
 
-function getTodayIso(timeZone = APP_TIMEZONE) {
-  const { year, month, day } = getNowPartsInTimezone(timeZone);
-  return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+function extractRemoteJid(payload: any) {
+  return payload?.data?.key?.remoteJid || payload?.data?.message?.key?.remoteJid || '';
 }
 
-function addDaysIso(baseIso: string, days: number) {
-  const date = new Date(`${baseIso}T12:00:00Z`);
-  date.setUTCDate(date.getUTCDate() + days);
-  return date.toISOString().slice(0, 10);
+function isGroupJid(remoteJid: string) {
+  return String(remoteJid || '').endsWith('@g.us');
 }
 
 function formatDateBR(value: string) {
@@ -56,136 +29,35 @@ function formatDateBR(value: string) {
   return `${day}/${month}/${year}`;
 }
 
-function normalizeText(value: unknown) {
-  return String(value || '')
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .toLowerCase();
+function getTodayIso() {
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, '0');
+  const d = String(now.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
 }
 
-function getPath(obj: any, path: string[]) {
-  return path.reduce((acc, key) => (acc == null ? undefined : acc[key]), obj);
+function addDaysIso(baseIso: string, days: number) {
+  const [y, m, d] = baseIso.split('-').map(Number);
+  const dt = new Date(y, m - 1, d);
+  dt.setDate(dt.getDate() + days);
+
+  const yy = dt.getFullYear();
+  const mm = String(dt.getMonth() + 1).padStart(2, '0');
+  const dd = String(dt.getDate()).padStart(2, '0');
+  return `${yy}-${mm}-${dd}`;
 }
 
-function extractFromMe(payload: any) {
-  const candidates = [
-    getPath(payload, ['data', 'key', 'fromMe']),
-    getPath(payload, ['key', 'fromMe']),
-    payload?.fromMe,
-    getPath(payload, ['data', 'fromMe']),
-  ];
-  return candidates.some(Boolean);
+function combineDateTime(dateStr: string, timeStr: string) {
+  const [year, month, day] = dateStr.split('-').map(Number);
+  const [hour, minute] = String(timeStr || '00:00:00')
+    .split(':')
+    .map(Number);
+
+  return new Date(year, month - 1, day, hour || 0, minute || 0, 0, 0);
 }
 
-function extractRemoteJid(payload: any) {
-  return (
-    getPath(payload, ['data', 'key', 'remoteJid']) ||
-    getPath(payload, ['key', 'remoteJid']) ||
-    payload?.remoteJid ||
-    getPath(payload, ['data', 'remoteJid']) ||
-    ''
-  );
-}
-
-function extractSenderJid(payload: any) {
-  const remoteJid = extractRemoteJid(payload);
-  const participant =
-    getPath(payload, ['data', 'key', 'participant']) ||
-    getPath(payload, ['key', 'participant']) ||
-    payload?.participant ||
-    getPath(payload, ['data', 'participant']) ||
-    '';
-
-  return String(participant || remoteJid || '');
-}
-
-function extractInstanceName(payload: any) {
-  return (
-    payload?.instance ||
-    payload?.instanceName ||
-    getPath(payload, ['data', 'instance']) ||
-    getPath(payload, ['data', 'instanceName']) ||
-    getPath(payload, ['sender', 'instance']) ||
-    ''
-  );
-}
-
-function extractSenderPushName(payload: any) {
-  return (
-    payload?.pushName ||
-    getPath(payload, ['data', 'pushName']) ||
-    getPath(payload, ['data', 'push_name']) ||
-    getPath(payload, ['sender', 'pushName']) ||
-    ''
-  );
-}
-
-function extractText(payload: any): string {
-  const candidates = [
-    getPath(payload, ['data', 'message', 'conversation']),
-    getPath(payload, ['message', 'conversation']),
-    getPath(payload, ['data', 'message', 'extendedTextMessage', 'text']),
-    getPath(payload, ['message', 'extendedTextMessage', 'text']),
-    getPath(payload, ['data', 'message', 'imageMessage', 'caption']),
-    getPath(payload, ['message', 'imageMessage', 'caption']),
-    getPath(payload, ['data', 'message', 'videoMessage', 'caption']),
-    getPath(payload, ['message', 'videoMessage', 'caption']),
-    payload?.text,
-    getPath(payload, ['data', 'text']),
-  ];
-
-  const value = candidates.find((item) => typeof item === 'string' && item.trim());
-  return String(value || '');
-}
-
-function isGroupJid(value: string) {
-  return String(value || '').endsWith('@g.us');
-}
-
-function buildPhoneCandidates(value: string) {
-  const normalized = normalizePhone(value || '');
-  const digits = onlyDigits(value || '');
-  const out = new Set<string>();
-
-  if (normalized) out.add(normalized);
-  if (digits) out.add(digits);
-  if (digits.startsWith('55')) out.add(digits.slice(2));
-  if (normalized.startsWith('55')) out.add(normalized.slice(2));
-
-  const base = normalized.startsWith('55') ? normalized.slice(2) : normalized;
-  if (base.length === 10) out.add(`55${base.slice(0, 2)}9${base.slice(2)}`);
-  if (base.length === 11 && base[2] === '9') out.add(`55${base.slice(0, 2)}${base.slice(3)}`);
-
-  return Array.from(out).filter(Boolean);
-}
-
-function buildJidCandidates(value: string) {
-  const phoneCandidates = buildPhoneCandidates(value);
-  const out = new Set<string>();
-
-  for (const phone of phoneCandidates) {
-    out.add(`${phone}@s.whatsapp.net`);
-  }
-
-  if (value) out.add(value);
-
-  return Array.from(out).filter(Boolean);
-}
-
-function extractBookingCode(text: string, command: string) {
-  const escaped = command.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const match = text.match(new RegExp(`^${escaped}\\s+(\\d+)$`, 'i'));
-  return match?.[1] || '';
-}
-
-function getRelationItem<T>(value: T | T[] | null | undefined): T | null {
-  if (Array.isArray(value)) return value[0] || null;
-  return value || null;
-}
-
-function getEvolutionConfigFromProfessional(professional: any): EvolutionConfig | null {
+function getEvolutionConfigFromProfessional(professional: any) {
   if (
     professional?.evolution_enabled &&
     professional?.evolution_api_url &&
@@ -202,531 +74,279 @@ function getEvolutionConfigFromProfessional(professional: any): EvolutionConfig 
   return null;
 }
 
+function isValidDateString(value: string) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(value);
+}
+
+function isValidTimeString(value: string) {
+  return /^\d{2}:\d{2}$/.test(value);
+}
+
 function resolveDateToken(token?: string) {
-  const normalized = normalizeText(token || '');
-  if (!normalized) return getTodayIso();
-  if (normalized === 'hoje') return getTodayIso();
-  if (normalized === 'amanha') return addDaysIso(getTodayIso(), 1);
-  if (/^\d{4}-\d{2}-\d{2}$/.test(normalized)) return normalized;
-  return '';
+  if (!token) return getTodayIso();
+  if (token === 'hoje') return getTodayIso();
+  if (token === 'amanha' || token === 'amanhã') return addDaysIso(getTodayIso(), 1);
+  if (isValidDateString(token)) return token;
+  return null;
 }
 
-async function attachCustomerIdentity(senderNumber: string, remoteJid: string) {
-  try {
-    if (!senderNumber) return;
-
-    const phoneCandidates = buildPhoneCandidates(senderNumber);
-    const jidCandidates = buildJidCandidates(remoteJid);
-
-    const { data: customers } = await supabaseAdmin
-      .from('customers')
-      .select('id, whatsapp_number, whatsapp_jid')
-      .in('whatsapp_number', phoneCandidates);
-
-    for (const customer of customers || []) {
-      const needsJid = remoteJid && customer.whatsapp_jid !== remoteJid;
-      const needsPhone = senderNumber && customer.whatsapp_number !== senderNumber;
-
-      if (!needsJid && !needsPhone) continue;
-
-      await supabaseAdmin
-        .from('customers')
-        .update({
-          whatsapp_number: senderNumber || customer.whatsapp_number,
-          whatsapp_jid: remoteJid || customer.whatsapp_jid,
-        })
-        .eq('id', customer.id);
-    }
-
-    const { data: bookings } = await supabaseAdmin
-      .from('bookings')
-      .select('id, customer_whatsapp, customer_jid, status')
-      .in('customer_whatsapp', phoneCandidates)
-      .in('status', ['pending', 'confirmed']);
-
-    for (const booking of bookings || []) {
-      const needsJid = remoteJid && booking.customer_jid !== remoteJid;
-      const needsPhone = senderNumber && booking.customer_whatsapp !== senderNumber;
-
-      if (!needsJid && !needsPhone) continue;
-
-      await supabaseAdmin
-        .from('bookings')
-        .update({
-          customer_whatsapp: senderNumber || booking.customer_whatsapp,
-          customer_jid: remoteJid || booking.customer_jid,
-        })
-        .eq('id', booking.id);
-    }
-
-    void jidCandidates;
-  } catch (error) {
-    console.error('Erro ao vincular identidade do cliente:', error);
-  }
+function timeToMinutes(time: string) {
+  const [h, m] = String(time || '00:00').split(':').map(Number);
+  return h * 60 + m;
 }
 
-async function requestBookingCancellationByCode(code: string, senderNumber: string, remoteJid: string) {
-  const { data: booking } = await supabaseAdmin
-    .from('bookings')
-    .select('id, customer_whatsapp, customer_jid, status')
-    .eq('daily_order_number', Number(code))
-    .eq('status', 'confirmed')
-    .or(`customer_whatsapp.eq.${senderNumber},customer_jid.eq.${remoteJid}`)
-    .order('booking_date', { ascending: true })
-    .limit(1)
-    .maybeSingle();
-
-  if (!booking) return { ok: false };
-
-  await supabaseAdmin
-    .from('bookings')
-    .update({
-      cancel_confirmation_pending: true,
-      cancel_confirmation_requested_at: new Date().toISOString(),
-    })
-    .eq('id', booking.id);
-
-  return { ok: true, bookingId: booking.id };
+function minutesToTime(minutes: number) {
+  const h = String(Math.floor(minutes / 60)).padStart(2, '0');
+  const m = String(minutes % 60).padStart(2, '0');
+  return `${h}:${m}`;
 }
 
-async function confirmBookingCancellationByCode(code: string, remoteJid: string) {
-  const { data: booking } = await supabaseAdmin
-    .from('bookings')
-    .select('id')
-    .eq('daily_order_number', Number(code))
-    .eq('cancel_confirmation_pending', true)
-    .eq('customer_jid', remoteJid)
-    .order('booking_date', { ascending: true })
-    .limit(1)
-    .maybeSingle();
-
-  if (!booking) return { ok: false };
-
-  await supabaseAdmin
-    .from('bookings')
-    .update({
-      status: 'cancelled',
-      cancelled_at: new Date().toISOString(),
-      cancellation_reason: 'Cancelado pelo cliente via WhatsApp',
-      cancel_confirmation_pending: false,
-      cancel_confirmation_requested_at: null,
-    })
-    .eq('id', booking.id);
-
-  return { ok: true };
-}
-
-async function cancelPendingCancellationRequestByCode(code: string, remoteJid: string) {
-  const { data: booking } = await supabaseAdmin
-    .from('bookings')
-    .select('id')
-    .eq('daily_order_number', Number(code))
-    .eq('cancel_confirmation_pending', true)
-    .eq('customer_jid', remoteJid)
-    .order('booking_date', { ascending: true })
-    .limit(1)
-    .maybeSingle();
-
-  if (!booking) return { ok: false };
-
-  await supabaseAdmin
-    .from('bookings')
-    .update({
-      cancel_confirmation_pending: false,
-      cancel_confirmation_requested_at: null,
-    })
-    .eq('id', booking.id);
-
-  return { ok: true };
-}
-
-async function requestBookingCancellationByCustomer(senderNumber: string, remoteJid: string) {
-  const { data: booking } = await supabaseAdmin
-    .from('bookings')
-    .select('id')
-    .eq('customer_whatsapp', senderNumber)
-    .eq('status', 'confirmed')
-    .gte('booking_date', getTodayIso())
-    .order('booking_date', { ascending: true })
-    .order('start_time', { ascending: true })
-    .limit(1)
-    .maybeSingle();
-
-  if (!booking) return { ok: false };
-
-  await supabaseAdmin
-    .from('bookings')
-    .update({
-      customer_jid: remoteJid || null,
-      cancel_confirmation_pending: true,
-      cancel_confirmation_requested_at: new Date().toISOString(),
-    })
-    .eq('id', booking.id);
-
-  return { ok: true, bookingId: booking.id };
-}
-
-async function confirmBookingCancellationByCustomer(senderNumber: string, remoteJid: string) {
-  const { data: booking } = await supabaseAdmin
-    .from('bookings')
-    .select('id')
-    .eq('customer_whatsapp', senderNumber)
-    .eq('cancel_confirmation_pending', true)
-    .or(`customer_jid.eq.${remoteJid},customer_whatsapp.eq.${senderNumber}`)
-    .order('booking_date', { ascending: true })
-    .order('start_time', { ascending: true })
-    .limit(1)
-    .maybeSingle();
-
-  if (!booking) return { ok: false };
-
-  await supabaseAdmin
-    .from('bookings')
-    .update({
-      status: 'cancelled',
-      cancelled_at: new Date().toISOString(),
-      cancellation_reason: 'Cancelado pelo cliente via WhatsApp',
-      cancel_confirmation_pending: false,
-      cancel_confirmation_requested_at: null,
-    })
-    .eq('id', booking.id);
-
-  return { ok: true };
-}
-
-async function cancelPendingCancellationRequestByCustomer(senderNumber: string, remoteJid: string) {
-  const { data: booking } = await supabaseAdmin
-    .from('bookings')
-    .select('id')
-    .eq('customer_whatsapp', senderNumber)
-    .eq('cancel_confirmation_pending', true)
-    .or(`customer_jid.eq.${remoteJid},customer_whatsapp.eq.${senderNumber}`)
-    .order('booking_date', { ascending: true })
-    .order('start_time', { ascending: true })
-    .limit(1)
-    .maybeSingle();
-
-  if (!booking) return { ok: false };
-
-  await supabaseAdmin
-    .from('bookings')
-    .update({
-      cancel_confirmation_pending: false,
-      cancel_confirmation_requested_at: null,
-    })
-    .eq('id', booking.id);
-
-  return { ok: true };
-}
-
-async function tryHandleInboundAutoReply(
-  payload: any,
-  senderNumber: string,
-  remoteJid: string,
-  senderPushName: string
-) {
-  try {
-    const instanceName = extractInstanceName(payload);
-    const { data: professional } = await supabaseAdmin
-      .from('professionals')
-      .select(`
-        id,
-        barbershop_id,
-        name,
-        auto_reply_enabled,
-        auto_reply_message,
-        evolution_enabled,
-        evolution_api_url,
-        evolution_instance,
-        evolution_api_key
-      `)
-      .eq('evolution_instance', instanceName)
-      .maybeSingle();
-
-    if (!professional?.auto_reply_enabled || !professional?.auto_reply_message) {
-      return { handled: false as const };
-    }
-
-    const { data: existingLog } = await supabaseAdmin
-      .from('whatsapp_auto_reply_logs')
-      .select('id, last_sent_at')
-      .eq('professional_id', professional.id)
-      .eq('customer_phone', senderNumber)
-      .maybeSingle();
-
-    const now = Date.now();
-    const lastSent = existingLog?.last_sent_at ? new Date(existingLog.last_sent_at).getTime() : 0;
-    const cooldownMs = 12 * 60 * 60 * 1000;
-
-    if (lastSent && now - lastSent < cooldownMs) {
-      return { handled: false as const };
-    }
-
-    const evolutionConfig = getEvolutionConfigFromProfessional(professional);
-    const message = professional.auto_reply_message
-      .replace(/\{nome\}/gi, senderPushName || 'cliente')
-      .replace(/\{telefone\}/gi, senderNumber || '')
-      .replace(/\{jid\}/gi, remoteJid || '');
-
-    await sendWhatsAppMessage(senderNumber, message, evolutionConfig);
-
-    if (existingLog?.id) {
-      await supabaseAdmin
-        .from('whatsapp_auto_reply_logs')
-        .update({
-          customer_jid: remoteJid || null,
-          last_sent_at: new Date().toISOString(),
-        })
-        .eq('id', existingLog.id);
-    } else {
-      await supabaseAdmin.from('whatsapp_auto_reply_logs').insert({
-        barbershop_id: professional.barbershop_id,
-        professional_id: professional.id,
-        customer_phone: senderNumber,
-        customer_jid: remoteJid || null,
-        last_sent_at: new Date().toISOString(),
-      });
-    }
-
-    return { handled: true as const, action: 'auto-reply-sent' };
-  } catch (error) {
-    console.error('Erro na resposta automática inbound:', error);
-    return { handled: false as const };
-  }
-}
-
-async function findProfessionalByWhatsapp(senderNumber: string) {
-  const phoneCandidates = buildPhoneCandidates(senderNumber);
+async function findProfessionalByWhatsapp(phone: string) {
+  const normalized = normalizePhone(phone);
+  if (!normalized) return null;
 
   const { data } = await supabaseAdmin
     .from('professionals')
     .select(`
       id,
       name,
+      barbershop_id,
       whatsapp_number,
       evolution_enabled,
       evolution_api_url,
       evolution_instance,
-      evolution_api_key
+      evolution_api_key,
+      barbershops (
+        id,
+        name
+      )
     `)
-    .in('whatsapp_number', phoneCandidates)
+    .eq('whatsapp_number', normalized)
     .maybeSingle();
 
-  return data;
+  return data || null;
 }
 
-async function getBookingsText(professionalId: string, targetDate: string, title: string) {
-  const { data: bookings } = await supabaseAdmin
+async function getBookingsText(professionalId: string, bookingDate: string, title: string) {
+  const { data: bookings, error } = await supabaseAdmin
     .from('bookings')
     .select(`
       id,
-      start_time,
       daily_order_number,
       customer_name,
+      booking_date,
+      start_time,
       status,
-      services(name)
+      services (
+        name
+      )
     `)
     .eq('professional_id', professionalId)
-    .eq('booking_date', targetDate)
-    .in('status', ['pending', 'confirmed', 'completed'])
+    .eq('booking_date', bookingDate)
+    .neq('status', 'cancelled')
     .order('start_time', { ascending: true });
 
-  const rows = (bookings || []).map((booking: any) => {
-    const service = getRelationItem<{ name?: string }>(booking.services);
-    return `${booking.start_time} - Nº ${booking.daily_order_number || '-'} - ${booking.customer_name || 'Cliente'} - ${service?.name || 'Serviço'}`;
-  });
-
-  if (!rows.length) {
-    return `${title}\n${formatDateBR(targetDate)}\n\nNenhum agendamento encontrado.`;
+  if (error) {
+    console.error('Erro ao buscar agendamentos:', error);
+    return 'Erro ao buscar agendamentos.';
   }
 
-  return `${title}\n${formatDateBR(targetDate)}\n\n${rows.join('\n')}`;
+  if (!bookings || bookings.length === 0) {
+    return `Nenhum agendamento encontrado para ${formatDateBR(bookingDate)}.`;
+  }
+
+  const lines = bookings.map((booking: any) => {
+    const serviceName = booking?.services?.name || 'Serviço';
+    const number = booking?.daily_order_number ? `#${booking.daily_order_number} • ` : '';
+    return `${number}${booking.customer_name} — ${booking.start_time} — ${serviceName}`;
+  });
+
+  return `${title} (${formatDateBR(bookingDate)})
+
+${lines.join('
+')}`;
 }
 
-async function findBookingByDailyNumber(professionalId: string, targetDate: string, number: number) {
-  return supabaseAdmin
+async function findNextBookingByCustomerWhatsapp(phone: string) {
+  const normalized = normalizePhone(phone);
+  if (!normalized) return null;
+
+  const today = getTodayIso();
+
+  const { data: bookings, error } = await supabaseAdmin
+    .from('bookings')
+    .select(`
+      *,
+      service:services(id, name),
+      professional:professionals(
+        id,
+        name,
+        whatsapp_number,
+        evolution_enabled,
+        evolution_api_url,
+        evolution_instance,
+        evolution_api_key
+      ),
+      customer:customers(id, name, whatsapp_number, phone),
+      barbershop:barbershops(id, name, whatsapp_number)
+    `)
+    .eq('customer_whatsapp', normalized)
+    .eq('status', 'confirmed')
+    .gte('booking_date', today)
+    .order('booking_date', { ascending: true })
+    .order('start_time', { ascending: true });
+
+  if (error || !bookings?.length) return null;
+
+  const now = new Date();
+  const next = bookings.find((booking: any) => {
+    const bookingDt = combineDateTime(booking.booking_date, booking.start_time);
+    return bookingDt.getTime() > now.getTime();
+  });
+
+  return next || null;
+}
+
+async function cancelBookingByCustomerWhatsapp(phone: string) {
+  const booking = await findNextBookingByCustomerWhatsapp(phone);
+
+  if (!booking) {
+    return { ok: false, reason: 'not-found' as const };
+  }
+
+  const { error: updateError } = await supabaseAdmin
+    .from('bookings')
+    .update({
+      status: 'cancelled',
+      cancelled_at: new Date().toISOString(),
+      cancellation_reason: 'Cancelado pelo cliente via WhatsApp',
+      cancelled_by_customer_via_whatsapp: true,
+    })
+    .eq('id', booking.id);
+
+  if (updateError) {
+    throw new Error(updateError.message);
+  }
+
+  const customerPhone = normalizePhone(
+    booking?.customer?.whatsapp_number || booking?.customer?.phone || booking?.customer_whatsapp || ''
+  );
+
+  const barberPhone = normalizePhone(
+    booking?.professional?.whatsapp_number || booking?.barbershop?.whatsapp_number || ''
+  );
+
+  const evolutionConfig = getEvolutionConfigFromProfessional(booking?.professional);
+
+  if (customerPhone) {
+    await sendWhatsAppMessage(
+      customerPhone,
+      `Olá, ${booking?.customer?.name || booking?.customer_name || 'cliente'}.
+
+Seu agendamento em ${booking?.barbershop?.name || 'nossa barbearia'} foi cancelado com sucesso.
+
+Serviço: ${booking?.service?.name || 'Serviço'}
+Profissional: ${booking?.professional?.name || 'Barbeiro'}
+Data: ${formatDateBR(booking?.booking_date)}
+Hora: ${booking?.start_time}
+
+Seu horário foi liberado no sistema.`,
+      evolutionConfig
+    );
+  }
+
+  if (barberPhone) {
+    try {
+      await sendWhatsAppMessage(
+        barberPhone,
+        `📌 Cancelamento automático
+
+Cliente: ${booking?.customer?.name || booking?.customer_name || 'Cliente'}
+Serviço: ${booking?.service?.name || 'Serviço'}
+Data: ${formatDateBR(booking?.booking_date)}
+Hora: ${booking?.start_time}
+
+O cliente cancelou pelo WhatsApp e o horário já foi liberado.`,
+        evolutionConfig
+      );
+    } catch (err) {
+      console.error('Erro ao avisar barbeiro sobre cancelamento automático:', err);
+    }
+  }
+
+  return { ok: true, booking };
+}
+
+async function findBookingByDailyNumber(professionalId: string, bookingDate: string, dailyOrderNumber: number) {
+  return await supabaseAdmin
     .from('bookings')
     .select(`
       id,
-      status,
-      start_time,
-      booking_date,
+      barbershop_id,
+      customer_id,
+      professional_id,
+      service_id,
       customer_name,
       customer_whatsapp,
-      customers(name, whatsapp_number, phone),
-      services(name)
+      booking_date,
+      start_time,
+      end_time,
+      daily_order_number,
+      status,
+      customers (
+        id,
+        name,
+        whatsapp_number,
+        phone
+      ),
+      services (
+        id,
+        name,
+        duration_minutes
+      ),
+      professionals (
+        id,
+        name,
+        whatsapp_number,
+        evolution_enabled,
+        evolution_api_url,
+        evolution_instance,
+        evolution_api_key
+      )
     `)
     .eq('professional_id', professionalId)
-    .eq('booking_date', targetDate)
-    .eq('daily_order_number', number)
+    .eq('booking_date', bookingDate)
+    .eq('daily_order_number', dailyOrderNumber)
     .maybeSingle();
 }
 
 export async function POST(req: Request) {
   try {
-    if (process.env.ENABLE_WHATSAPP_INBOUND_AUTOMATION !== 'true') {
-      return NextResponse.json({ ok: true, ignored: 'inbound-automation-disabled' });
-    }
-
     const payload = await req.json();
 
-    console.log('WEBHOOK_PAYLOAD:', JSON.stringify(payload, null, 2));
-
-    const fromMe = extractFromMe(payload);
-    const senderJid = extractSenderJid(payload);
-    const remoteJid = extractRemoteJid(payload);
-    const instanceName = extractInstanceName(payload);
-    const senderPushName = extractSenderPushName(payload);
-    const rawText = extractText(payload);
-    const normalizedText = normalizeText(rawText);
-
-    console.log('WEBHOOK_DEBUG:', {
-      fromMe,
-      senderJid,
-      remoteJid,
-      rawText,
-      normalizedText,
-      event: payload?.event,
-      instanceName,
-      senderPushName,
-    });
-
+    const fromMe = Boolean(payload?.data?.key?.fromMe);
     if (fromMe) {
       return NextResponse.json({ ok: true, ignored: 'fromMe' });
     }
 
-    if (!senderJid || isGroupJid(senderJid)) {
+    const remoteJid = extractRemoteJid(payload);
+    if (!remoteJid || isGroupJid(remoteJid)) {
       return NextResponse.json({ ok: true, ignored: 'group-or-empty' });
     }
 
-    const senderNumber = normalizePhone(senderJid);
+    const senderNumber = normalizePhone(remoteJid);
+    const rawText = extractText(payload);
+    const text = String(rawText || '').trim().toLowerCase();
 
-    console.log('WEBHOOK_NORMALIZED:', {
-      senderJid,
-      remoteJid,
-      instanceName,
-      senderNumber,
-      text: normalizedText,
-      phoneCandidates: buildPhoneCandidates(senderJid),
-      jidCandidates: buildJidCandidates(remoteJid),
-    });
-
-    if (!senderNumber || !normalizedText) {
+    if (!senderNumber || !text) {
       return NextResponse.json({ ok: true, ignored: 'empty-message' });
     }
 
-    await attachCustomerIdentity(senderNumber, remoteJid);
-
-    const cancelCode = extractBookingCode(normalizedText, 'cancelar');
-    const confirmCode = extractBookingCode(normalizedText, 'sim');
-    const abortCode = extractBookingCode(normalizedText, 'nao');
-
-    if (cancelCode) {
-      const result = await requestBookingCancellationByCode(cancelCode, senderNumber, remoteJid);
-
-      if (result.ok) {
-        return NextResponse.json({ ok: true, action: 'customer-cancel-requested-by-code' });
+    if (text === 'cancelar') {
+      const customerCancellation = await cancelBookingByCustomerWhatsapp(senderNumber);
+      if (customerCancellation.ok) {
+        return NextResponse.json({ ok: true, action: 'customer-cancelled' });
       }
-
-      return NextResponse.json({
-        ok: true,
-        action: 'customer-cancel-code-not-found',
-        reason: 'Nenhum agendamento futuro confirmado encontrado para este código.',
-        code: cancelCode,
-      });
-    }
-
-    if (confirmCode) {
-      const result = await confirmBookingCancellationByCode(confirmCode, remoteJid);
-
-      if (result.ok) {
-        return NextResponse.json({ ok: true, action: 'customer-cancel-confirmed-by-code' });
-      }
-
-      return NextResponse.json({
-        ok: true,
-        action: 'customer-cancel-confirm-code-not-found',
-        reason: 'Nenhum pedido de cancelamento pendente encontrado para este código.',
-        code: confirmCode,
-      });
-    }
-
-    if (abortCode) {
-      const result = await cancelPendingCancellationRequestByCode(abortCode, remoteJid);
-
-      if (result.ok) {
-        return NextResponse.json({ ok: true, action: 'customer-cancel-aborted-by-code' });
-      }
-
-      return NextResponse.json({
-        ok: true,
-        action: 'customer-cancel-abort-code-not-found',
-        reason: 'Nenhum pedido de cancelamento pendente encontrado para este código.',
-        code: abortCode,
-      });
-    }
-
-    if (normalizedText === 'cancelar') {
-      const result = await requestBookingCancellationByCustomer(senderNumber, remoteJid);
-
-      if (result.ok) {
-        return NextResponse.json({ ok: true, action: 'customer-cancel-requested' });
-      }
-
-      return NextResponse.json({
-        ok: true,
-        action: 'customer-cancel-not-found',
-        reason: 'Nenhum agendamento futuro confirmado encontrado para este número.',
-        senderNumber,
-        remoteJid,
-      });
-    }
-
-    if (normalizedText === 'sim') {
-      const result = await confirmBookingCancellationByCustomer(senderNumber, remoteJid);
-
-      if (result.ok) {
-        return NextResponse.json({ ok: true, action: 'customer-cancel-confirmed' });
-      }
-
-      return NextResponse.json({
-        ok: true,
-        action: 'customer-cancel-confirm-not-found',
-        reason: 'Nenhum pedido de cancelamento pendente encontrado para este número.',
-        senderNumber,
-        remoteJid,
-      });
-    }
-
-    if (normalizedText === 'nao') {
-      const result = await cancelPendingCancellationRequestByCustomer(senderNumber, remoteJid);
-
-      if (result.ok) {
-        return NextResponse.json({ ok: true, action: 'customer-cancel-aborted' });
-      }
-
-      return NextResponse.json({
-        ok: true,
-        action: 'customer-cancel-abort-not-found',
-        reason: 'Nenhum pedido de cancelamento pendente encontrado para este número.',
-        senderNumber,
-        remoteJid,
-      });
-    }
-
-    const inboundAutoReply = await tryHandleInboundAutoReply(
-      payload,
-      senderNumber,
-      remoteJid,
-      senderPushName
-    );
-
-    if (inboundAutoReply.handled) {
-      return NextResponse.json({
-        ok: true,
-        action: inboundAutoReply.action,
-        instanceName,
-      });
     }
 
     const professional = await findProfessionalByWhatsapp(senderNumber);
@@ -736,29 +356,29 @@ export async function POST(req: Request) {
 
     const evolutionConfig = getEvolutionConfigFromProfessional(professional);
 
-    if (normalizedText === 'agendamentos hoje' || normalizedText === 'agenda hoje') {
+    if (text === 'agendamentos hoje' || text === 'agenda hoje') {
       const today = getTodayIso();
       const replyText = await getBookingsText(professional.id, today, 'Agendamentos de hoje');
       await sendWhatsAppMessage(senderNumber, replyText, evolutionConfig);
       return NextResponse.json({ ok: true, action: 'bookings-today' });
     }
 
-    if (normalizedText === 'agendamentos amanha' || normalizedText === 'agenda amanha') {
+    if (text === 'agendamentos amanhã' || text === 'agendamentos amanha' || text === 'agenda amanhã' || text === 'agenda amanha') {
       const tomorrow = addDaysIso(getTodayIso(), 1);
       const replyText = await getBookingsText(professional.id, tomorrow, 'Agendamentos de amanhã');
       await sendWhatsAppMessage(senderNumber, replyText, evolutionConfig);
       return NextResponse.json({ ok: true, action: 'bookings-tomorrow' });
     }
 
-    if (normalizedText.startsWith('cancelar ')) {
-      const parts = normalizedText.split(/\s+/);
+    if (text.startsWith('cancelar ')) {
+      const parts = text.split(/\s+/);
       const number = Number(parts[1]);
       const dateToken = parts[2];
 
       if (!number || Number.isNaN(number)) {
         await sendWhatsAppMessage(
           senderNumber,
-          `Use:\n- cancelar 1\n- cancelar 1 amanha\n- cancelar 1 2026-04-10`,
+          'Use:\n- cancelar 1\n- cancelar 1 amanh\u00e3\n- cancelar 1 2026-04-10',
           evolutionConfig
         );
         return NextResponse.json({ ok: true, action: 'cancel-help' });
@@ -768,18 +388,13 @@ export async function POST(req: Request) {
       if (!targetDate) {
         await sendWhatsAppMessage(
           senderNumber,
-          `Data inválida.\n\nUse:\n- cancelar 1\n- cancelar 1 amanha\n- cancelar 1 2026-04-10`,
+          'Data inv\u00e1lida.\n\nUse:\n- cancelar 1\n- cancelar 1 amanh\u00e3\n- cancelar 1 2026-04-10',
           evolutionConfig
         );
         return NextResponse.json({ ok: true, action: 'cancel-invalid-date' });
       }
 
-      const { data: booking, error: findError } = await findBookingByDailyNumber(
-        professional.id,
-        targetDate,
-        number
-      );
-
+      const { data: booking, error: findError } = await findBookingByDailyNumber(professional.id, targetDate, number);
       if (findError || !booking) {
         await sendWhatsAppMessage(
           senderNumber,
@@ -804,8 +419,6 @@ export async function POST(req: Request) {
           status: 'cancelled',
           cancelled_at: new Date().toISOString(),
           cancellation_reason: 'Cancelado pelo barbeiro via WhatsApp',
-          cancel_confirmation_pending: false,
-          cancel_confirmation_requested_at: null,
         })
         .eq('id', booking.id);
 
@@ -820,24 +433,189 @@ export async function POST(req: Request) {
         evolutionConfig
       );
 
-      const customer = getRelationItem<{ name?: string; whatsapp_number?: string; phone?: string }>(
-        (booking as any)?.customers
-      );
-      const service = getRelationItem<{ name?: string }>((booking as any)?.services);
-
       const customerPhone = normalizePhone(
-        customer?.whatsapp_number || customer?.phone || (booking as any)?.customer_whatsapp || ''
+        booking?.customers?.whatsapp_number || booking?.customers?.phone || booking?.customer_whatsapp || ''
       );
-
       if (customerPhone) {
         await sendWhatsAppMessage(
           customerPhone,
-          `Olá, ${customer?.name || (booking as any)?.customer_name || 'cliente'}.\n\nSeu agendamento de ${service?.name || 'serviço'} em ${formatDateBR(targetDate)} às ${(booking as any).start_time} foi cancelado pela barbearia.`,
+          `Olá, ${booking?.customers?.name || booking?.customer_name || 'cliente'}.
+
+Seu agendamento de ${booking?.services?.name || 'serviço'} em ${formatDateBR(targetDate)} às ${booking.start_time} foi cancelado pela barbearia.
+
+Se quiser, entre em contato para remarcar.`,
           evolutionConfig
         );
       }
 
       return NextResponse.json({ ok: true, action: 'cancelled-by-barber' });
+    }
+
+    if (text.startsWith('remarcar')) {
+      const match = text.match(/^remarcar\s+(\d+)(?:\s+(hoje|amanha|amanhã|\d{4}-\d{2}-\d{2}))?\s+para\s+(\d{4}-\d{2}-\d{2})\s+(\d{2}:\d{2})$/);
+
+      if (!match) {
+        await sendWhatsAppMessage(
+          senderNumber,
+          'Use:\n- remarcar 1 para 2026-04-12 14:00\n- remarcar 1 amanh\u00e3 para 2026-04-12 14:00\n- remarcar 1 2026-04-10 para 2026-04-12 14:00',
+          evolutionConfig
+        );
+        return NextResponse.json({ ok: true, action: 'reschedule-help' });
+      }
+
+      const bookingNumber = Number(match[1]);
+      const oldDateToken = match[2];
+      const newDate = match[3];
+      const newStartTime = match[4];
+      const oldDate = resolveDateToken(oldDateToken || 'hoje');
+
+      if (!oldDate) {
+        await sendWhatsAppMessage(senderNumber, 'Data original inválida.', evolutionConfig);
+        return NextResponse.json({ ok: true, action: 'reschedule-invalid-old-date' });
+      }
+
+      if (!isValidDateString(newDate) || !isValidTimeString(newStartTime)) {
+        await sendWhatsAppMessage(
+          senderNumber,
+          'Nova data ou hora inv\u00e1lida.\nExemplo: remarcar 1 para 2026-04-12 14:00',
+          evolutionConfig
+        );
+        return NextResponse.json({ ok: true, action: 'reschedule-invalid-new-date' });
+      }
+
+      const { data: booking, error: bookingError } = await findBookingByDailyNumber(professional.id, oldDate, bookingNumber);
+      if (bookingError || !booking) {
+        await sendWhatsAppMessage(
+          senderNumber,
+          `Agendamento ${bookingNumber} não encontrado em ${formatDateBR(oldDate)}.`,
+          evolutionConfig
+        );
+        return NextResponse.json({ ok: true, action: 'reschedule-not-found' });
+      }
+
+      if (booking.status === 'cancelled') {
+        await sendWhatsAppMessage(
+          senderNumber,
+          `Agendamento ${bookingNumber} está cancelado e não pode ser remarcado.`,
+          evolutionConfig
+        );
+        return NextResponse.json({ ok: true, action: 'reschedule-already-cancelled' });
+      }
+
+      const service = booking.services;
+      if (!service) {
+        await sendWhatsAppMessage(senderNumber, 'Serviço do agendamento não encontrado.', evolutionConfig);
+        return NextResponse.json({ ok: true, action: 'reschedule-no-service' });
+      }
+
+      const newEndMinutes = timeToMinutes(newStartTime) + Number(service.duration_minutes || 30);
+      const newEndTime = minutesToTime(newEndMinutes);
+
+      const { data: conflicts, error: conflictError } = await supabaseAdmin
+        .from('bookings')
+        .select('id, start_time, end_time, status')
+        .eq('professional_id', professional.id)
+        .eq('booking_date', newDate)
+        .in('status', ['pending', 'confirmed'])
+        .neq('id', booking.id);
+
+      if (conflictError) {
+        await sendWhatsAppMessage(senderNumber, 'Erro ao verificar conflitos.', evolutionConfig);
+        return NextResponse.json({ ok: true, action: 'reschedule-conflict-error' });
+      }
+
+      const { data: blocks, error: blocksError } = await supabaseAdmin
+        .from('time_blocks')
+        .select('start_time, end_time')
+        .eq('professional_id', professional.id)
+        .eq('block_date', newDate);
+
+      if (blocksError) {
+        await sendWhatsAppMessage(senderNumber, 'Erro ao verificar bloqueios.', evolutionConfig);
+        return NextResponse.json({ ok: true, action: 'reschedule-block-error' });
+      }
+
+      const occupiedRanges = [
+        ...(conflicts || []).map((item: any) => ({
+          start: timeToMinutes(item.start_time),
+          end: timeToMinutes(item.end_time),
+        })),
+        ...(blocks || []).map((item: any) => ({
+          start: timeToMinutes(item.start_time),
+          end: timeToMinutes(item.end_time),
+        })),
+      ];
+
+      const hasConflict = occupiedRanges.some((range) => {
+        return timeToMinutes(newStartTime) < range.end && newEndMinutes > range.start;
+      });
+
+      if (hasConflict) {
+        await sendWhatsAppMessage(
+          senderNumber,
+          `Conflito de horário. Já existe outro agendamento em ${formatDateBR(newDate)} às ${newStartTime}.`,
+          evolutionConfig
+        );
+        return NextResponse.json({ ok: true, action: 'reschedule-conflict' });
+      }
+
+      const { data: sameDayBookings } = await supabaseAdmin
+        .from('bookings')
+        .select('daily_order_number')
+        .eq('professional_id', professional.id)
+        .eq('booking_date', newDate)
+        .neq('id', booking.id)
+        .order('daily_order_number', { ascending: false })
+        .limit(1);
+
+      const newDailyOrderNumber = sameDayBookings?.length
+        ? Number(sameDayBookings[0].daily_order_number) + 1
+        : 1;
+
+      const { error: updateError } = await supabaseAdmin
+        .from('bookings')
+        .update({
+          booking_date: newDate,
+          start_time: newStartTime,
+          end_time: newEndTime,
+          daily_order_number: newDailyOrderNumber,
+          status: 'confirmed',
+        })
+        .eq('id', booking.id);
+
+      if (updateError) {
+        await sendWhatsAppMessage(senderNumber, 'Erro ao remarcar agendamento.', evolutionConfig);
+        return NextResponse.json({ ok: true, action: 'reschedule-error' });
+      }
+
+      await sendWhatsAppMessage(
+        senderNumber,
+        `Agendamento ${bookingNumber} remarcado com sucesso.
+
+De: ${formatDateBR(oldDate)} ${booking.start_time}
+Para: ${formatDateBR(newDate)} ${newStartTime}`,
+        evolutionConfig
+      );
+
+      const customerPhone = normalizePhone(
+        booking?.customers?.whatsapp_number || booking?.customers?.phone || booking?.customer_whatsapp || ''
+      );
+      if (customerPhone) {
+        await sendWhatsAppMessage(
+          customerPhone,
+          `Olá, ${booking?.customers?.name || booking?.customer_name || 'cliente'}.
+
+Seu agendamento de ${service.name || 'serviço'} foi remarcado.
+
+Data anterior: ${formatDateBR(oldDate)} às ${booking.start_time}
+Nova data: ${formatDateBR(newDate)} às ${newStartTime}
+
+Qualquer dúvida, fale com a barbearia.`,
+          evolutionConfig
+        );
+      }
+
+      return NextResponse.json({ ok: true, action: 'rescheduled-by-barber' });
     }
 
     return NextResponse.json({ ok: true, ignored: 'unknown-command' });

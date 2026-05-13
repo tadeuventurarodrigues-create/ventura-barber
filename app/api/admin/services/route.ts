@@ -6,31 +6,10 @@ function parseMoney(value: unknown) {
   return Number(String(value || '0').replace(',', '.'));
 }
 
-async function canManageServiceBarbershop(profile: Awaited<ReturnType<typeof getCurrentProfile>>, barbershopId: string) {
-  if (!profile) return false;
-  if (profile.role === 'admin') return true;
-
-  if ((profile.role === 'shop_manager' || profile.role === 'shop_barber') && profile.barbershop_id) {
-    return profile.barbershop_id === barbershopId;
-  }
-
-  return false;
-}
-
-async function getServiceBarbershopId(serviceId: string) {
-  const result = await supabaseAdmin
-    .from('services')
-    .select('id, barbershop_id')
-    .eq('id', serviceId)
-    .maybeSingle();
-
-  return result.data || null;
-}
-
 export async function POST(req: Request) {
   try {
     const profile = await getCurrentProfile();
-    if (!profile) {
+    if (!profile || profile.role !== 'admin') {
       return NextResponse.json({ error: 'Sem permissão.' }, { status: 403 });
     }
 
@@ -47,11 +26,6 @@ export async function POST(req: Request) {
         { error: 'Barbearia, nome, valor e duração são obrigatórios.' },
         { status: 400 }
       );
-    }
-
-    const allowed = await canManageServiceBarbershop(profile, barbershopId);
-    if (!allowed) {
-      return NextResponse.json({ error: 'Sem permissão.' }, { status: 403 });
     }
 
     const result = await supabaseAdmin
@@ -84,7 +58,7 @@ export async function POST(req: Request) {
 export async function PUT(req: Request) {
   try {
     const profile = await getCurrentProfile();
-    if (!profile) {
+    if (!profile || profile.role !== 'admin') {
       return NextResponse.json({ error: 'Sem permissão.' }, { status: 403 });
     }
 
@@ -101,16 +75,6 @@ export async function PUT(req: Request) {
         { error: 'ID, nome, valor e duração são obrigatórios.' },
         { status: 400 }
       );
-    }
-
-    const existing = await getServiceBarbershopId(id);
-    if (!existing) {
-      return NextResponse.json({ error: 'Serviço não encontrado.' }, { status: 404 });
-    }
-
-    const allowed = await canManageServiceBarbershop(profile, existing.barbershop_id);
-    if (!allowed) {
-      return NextResponse.json({ error: 'Sem permissão.' }, { status: 403 });
     }
 
     const result = await supabaseAdmin
@@ -143,7 +107,7 @@ export async function PUT(req: Request) {
 export async function DELETE(req: Request) {
   try {
     const profile = await getCurrentProfile();
-    if (!profile) {
+    if (!profile || profile.role !== 'admin') {
       return NextResponse.json({ error: 'Sem permissão.' }, { status: 403 });
     }
 
@@ -152,16 +116,6 @@ export async function DELETE(req: Request) {
 
     if (!id) {
       return NextResponse.json({ error: 'ID do serviço é obrigatório.' }, { status: 400 });
-    }
-
-    const existing = await getServiceBarbershopId(id);
-    if (!existing) {
-      return NextResponse.json({ error: 'Serviço não encontrado.' }, { status: 404 });
-    }
-
-    const allowed = await canManageServiceBarbershop(profile, existing.barbershop_id);
-    if (!allowed) {
-      return NextResponse.json({ error: 'Sem permissão.' }, { status: 403 });
     }
 
     const bookings = await supabaseAdmin.from('bookings').select('id').eq('service_id', id).limit(1);

@@ -1,4 +1,0 @@
-1. Faça upload deste projeto ou substitua os arquivos no projeto atual.
-2. Na Vercel, confirme a variável CRON_SECRET.
-3. Faça um novo deploy e teste /api/build-info.
-4. Depois teste as 3 rotas de jobs.

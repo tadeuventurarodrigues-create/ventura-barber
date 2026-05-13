@@ -100,6 +100,7 @@ export default async function PublicBarbershopPage({
               professionals={professionals || []}
               loyaltyEnabled={Boolean(loyalty?.enabled)}
               loyaltyRules={loyalty?.rules_text || ''}
+              whatsappNumber={shop.whatsapp_number || null}
             />
           </div>
         </div>

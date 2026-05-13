@@ -29,11 +29,16 @@ export default async function ShopPage() {
     .eq('barbershop_id', profile.barbershop_id)
     .order('created_at', { ascending: true });
 
-  const servicesRes = await supabaseAdmin
-    .from('services')
-    .select('id, barbershop_id, name, description, price, duration_minutes, is_active')
-    .eq('barbershop_id', profile.barbershop_id)
-    .order('created_at', { ascending: true });
+  // Busca dados completos do barbeiro logado (para o novo painel)
+  let currentProfessional = null;
+  if (profile.role === 'shop_barber' && profile.professional_id) {
+    const { data: profData } = await supabaseAdmin
+      .from('professionals')
+      .select('id, name, description, photo_url, specialty, whatsapp_number')
+      .eq('id', profile.professional_id)
+      .maybeSingle();
+    currentProfessional = profData ?? null;
+  }
 
   const bookingsBaseQuery = supabaseAdmin
     .from('bookings')
@@ -129,7 +134,7 @@ export default async function ShopPage() {
           professionals={professionalsRes.data || []}
           bookings={bookings}
           workingHours={workingHoursRes.data || []}
-          services={servicesRes.data || []}
+          currentProfessional={currentProfessional}
         />
       </section>
     </main>

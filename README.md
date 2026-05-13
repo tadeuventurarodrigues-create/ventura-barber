@@ -18,7 +18,7 @@ O **Ventura Barber** é uma plataforma SaaS para barbearias que permite:
 - Supabase
 - PostgreSQL
 - Evolution API
-- Vercel i
+- Vercel
 
 ## 🌐 Funcionalidades
 
@@ -154,4 +154,3 @@ Esse sistema pode ser usado para:
 ## Resumo comercial
 
 > Sistema de agendamento para barbearias com confirmação automática via WhatsApp, pensado para organização, automação e venda em modelo SaaS.
-"# ventura-barber"  

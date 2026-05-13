@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import { BarberShopStorefront } from './barber-shop-storefront';
 
 type Service = {
   id: string;
@@ -26,8 +27,6 @@ type CustomerLookupResponse = {
   } | null;
 };
 
-type DateMode = 'today' | 'tomorrow' | 'custom';
-
 type Props = {
   barbershopId: string;
   barbershopName: string;
@@ -35,6 +34,7 @@ type Props = {
   professionals: Professional[];
   loyaltyEnabled?: boolean;
   loyaltyRules?: string | null;
+  whatsappNumber?: string | null;
 };
 
 function onlyDigits(value: string) {
@@ -58,33 +58,6 @@ function formatWhatsappInput(value: string) {
   return `(${digits.slice(0, 2)}) ${digits.slice(2, 7)}-${digits.slice(7)}`;
 }
 
-// Usa o mesmo fuso do servidor (America/Fortaleza) para evitar divergencia de data
-// entre o frontend (fuso do navegador do cliente) e o backend.
-const APP_TIMEZONE_CLIENT = 'America/Fortaleza';
-
-function getLocalIsoDate(date = new Date()) {
-  const formatter = new Intl.DateTimeFormat('en-CA', {
-    timeZone: APP_TIMEZONE_CLIENT,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  });
-  return formatter.format(date);
-}
-
-function addDaysToIsoDate(isoDate: string, days: number) {
-  const [year, month, day] = isoDate.split('-').map(Number);
-  const dt = new Date(year, month - 1, day);
-  dt.setDate(dt.getDate() + days);
-  return getLocalIsoDate(dt);
-}
-
-function formatDateModeLabel(mode: DateMode) {
-  if (mode === 'today') return 'Hoje';
-  if (mode === 'tomorrow') return 'Amanhã';
-  return 'Data escolhida';
-}
-
 export function PublicBookingForm({
   barbershopId,
   barbershopName,
@@ -92,35 +65,25 @@ export function PublicBookingForm({
   professionals,
   loyaltyEnabled,
   loyaltyRules,
+  whatsappNumber,
 }: Props) {
-  // Recalcula a data atual a cada minuto para não congelar quando a página
-  // fica aberta durante a virada do dia (ex: aberta às 23:59).
-  const [todayIso, setTodayIso] = useState(() => getLocalIsoDate());
-  const tomorrowIso = useMemo(() => addDaysToIsoDate(todayIso, 1), [todayIso]);
-  const maxBookingDate = useMemo(() => addDaysToIsoDate(todayIso, 6), [todayIso]);
-
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setTodayIso(getLocalIsoDate());
-    }, 60_000);
-    return () => clearInterval(interval);
-  }, []);
-
   const [serviceId, setServiceId] = useState('');
   const [professionalId, setProfessionalId] = useState('');
-  const [dateMode, setDateMode] = useState<DateMode>('today');
-  const [bookingDate, setBookingDate] = useState(todayIso);
+  const [bookingDate, setBookingDate] = useState('');
   const [startTime, setStartTime] = useState('');
   const [customerName, setCustomerName] = useState('');
   const [customerWhatsapp, setCustomerWhatsapp] = useState('');
   const [phoneStepUnlocked, setPhoneStepUnlocked] = useState(false);
   const [customerFound, setCustomerFound] = useState(false);
+  const [customerVisits, setCustomerVisits] = useState<number | null>(null);
   const [lookupLoading, setLookupLoading] = useState(false);
   const [lookupMessage, setLookupMessage] = useState('');
   const [times, setTimes] = useState<string[]>([]);
   const [message, setMessage] = useState('');
   const [loadingTimes, setLoadingTimes] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [showShop, setShowShop] = useState(false);
+  const [bookingConfirmed, setBookingConfirmed] = useState(false);
 
   const selectedService = useMemo(
     () => services.find((item) => item.id === serviceId),
@@ -132,30 +95,6 @@ export function PublicBookingForm({
     () => isValidBrazilWhatsapp11Digits(customerWhatsapp),
     [customerWhatsapp]
   );
-
-  useEffect(() => {
-    if (!phoneStepUnlocked) return;
-
-    if (dateMode === 'today') {
-      if (bookingDate !== todayIso) {
-        setBookingDate(todayIso);
-        setStartTime('');
-      }
-      return;
-    }
-
-    if (dateMode === 'tomorrow') {
-      if (bookingDate !== tomorrowIso) {
-        setBookingDate(tomorrowIso);
-        setStartTime('');
-      }
-      return;
-    }
-
-    if (!bookingDate) {
-      setBookingDate(todayIso);
-    }
-  }, [dateMode, phoneStepUnlocked, bookingDate, todayIso, tomorrowIso]);
 
   useEffect(() => {
     async function loadTimes() {
@@ -175,21 +114,12 @@ export function PublicBookingForm({
           booking_date: bookingDate,
         });
 
-        const res = await fetch(`/api/available-times?${params.toString()}`, {
-          cache: 'no-store',
-        });
+        const res = await fetch(`/api/available-times?${params.toString()}`);
         const data = await res.json();
 
-        const receivedTimes = Array.isArray(data.times) ? data.times : [];
-        setTimes(receivedTimes);
-        setStartTime((current) => (receivedTimes.includes(current) ? current : ''));
-        // Mostra erro vindo da API (ex: data fora do intervalo permitido)
-        if (data.error && receivedTimes.length === 0) {
-          setMessage(data.error);
-        }
+        setTimes(data.times || []);
       } catch {
         setTimes([]);
-        setStartTime('');
       } finally {
         setLoadingTimes(false);
       }
@@ -234,17 +164,16 @@ export function PublicBookingForm({
       }
 
       setPhoneStepUnlocked(true);
-      setDateMode('today');
-      setBookingDate(todayIso);
-      setStartTime('');
 
       if (data.found && data.customer) {
         setCustomerFound(true);
         setCustomerName(data.customer.name || '');
+        setCustomerVisits(data.customer.total_bookings || 0);
         setLookupMessage('Cliente encontrado. Seus dados já foram preenchidos.');
       } else {
         setCustomerFound(false);
         setCustomerName('');
+        setCustomerVisits(null);
         setLookupMessage('Número não encontrado. Preencha seu nome para continuar.');
       }
     } catch {
@@ -309,54 +238,102 @@ export function PublicBookingForm({
 
       setServiceId('');
       setProfessionalId('');
-      setDateMode('today');
-      setBookingDate(todayIso);
+      setBookingDate('');
       setStartTime('');
       setTimes([]);
       setSaving(false);
+      setBookingConfirmed(true);
+      setTimeout(() => setShowShop(true), 800);
     } catch {
       setMessage('Erro ao salvar.');
       setSaving(false);
     }
   }
 
-  function handleDateModeChange(mode: DateMode) {
-    setDateMode(mode);
-    setStartTime('');
-
-    if (mode === 'today') {
-      setBookingDate(todayIso);
-      return;
-    }
-
-    if (mode === 'tomorrow') {
-      setBookingDate(tomorrowIso);
-      return;
-    }
-
-    if (!bookingDate) {
-      setBookingDate(todayIso);
-    }
-  }
-
-  const noTimesMessage = useMemo(() => {
-    if (!phoneStepUnlocked || !serviceId || !professionalId || !bookingDate) return '';
-    if (loadingTimes) return '';
-    if (times.length > 0) return '';
-
-    if (dateMode === 'today') {
-      return 'Nenhum horário disponível hoje. Tente amanhã ou escolha outra data.';
-    }
-
-    if (dateMode === 'tomorrow') {
-      return 'Nenhum horário disponível amanhã. Escolha outra data.';
-    }
-
-    return 'Nenhum horário disponível para esta data.';
-  }, [phoneStepUnlocked, serviceId, professionalId, bookingDate, loadingTimes, times.length, dateMode]);
-
   return (
-    <form onSubmit={handleSubmit} className="space-y-5">
+    <>
+      {/* Botão Shopping antes do agendamento */}
+      {!bookingConfirmed && (
+        <button
+          type="button"
+          onClick={() => setShowShop(true)}
+          style={{
+            width: '100%',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: '10px',
+            padding: '14px 20px',
+            background: 'linear-gradient(135deg, rgba(196,155,99,0.15), rgba(196,155,99,0.08))',
+            border: '1px solid rgba(196,155,99,0.35)',
+            borderRadius: '18px',
+            color: '#c49b63',
+            fontWeight: 700,
+            fontSize: '14px',
+            cursor: 'pointer',
+            transition: 'all 0.2s',
+            marginBottom: '4px',
+          }}
+          onMouseEnter={e => (e.currentTarget.style.background = 'linear-gradient(135deg, rgba(196,155,99,0.25), rgba(196,155,99,0.14))')}
+          onMouseLeave={e => (e.currentTarget.style.background = 'linear-gradient(135deg, rgba(196,155,99,0.15), rgba(196,155,99,0.08))')}
+        >
+          <span style={{ fontSize: 20 }}>🛒</span>
+          <span>Shopping do Barbeiro</span>
+          <span style={{ marginLeft: 'auto', fontSize: 12, opacity: 0.6 }}>Ver produtos ›</span>
+        </button>
+      )}
+
+      {/* Modal Shopping */}
+      {showShop && (
+        <BarberShopStorefront
+          barbershopId={barbershopId}
+          barbershopName={barbershopName}
+          whatsappNumber={whatsappNumber}
+          asModal
+          onClose={() => setShowShop(false)}
+        />
+      )}
+
+      {/* Confirmação pós-agendamento */}
+      {bookingConfirmed && message && (
+        <div style={{
+          background: 'linear-gradient(135deg, rgba(52,199,89,0.12), rgba(52,199,89,0.06))',
+          border: '1px solid rgba(52,199,89,0.3)',
+          borderRadius: '18px',
+          padding: '20px',
+          textAlign: 'center',
+          marginBottom: '4px',
+        }}>
+          <div style={{ fontSize: 36, marginBottom: 8 }}>✅</div>
+          <p style={{ color: '#4ade80', fontWeight: 700, fontSize: 15, margin: '0 0 8px' }}>
+            {message}
+          </p>
+          <p style={{ color: 'rgba(255,255,255,0.55)', fontSize: 13, margin: '0 0 16px' }}>
+            Aguardamos você! Enquanto isso, conheça nossos produtos.
+          </p>
+          <button
+            type="button"
+            onClick={() => setShowShop(true)}
+            style={{
+              background: 'linear-gradient(135deg, #c49b63, #a07840)',
+              color: '#0a0a0a',
+              border: 'none',
+              borderRadius: '14px',
+              padding: '12px 24px',
+              fontWeight: 700,
+              fontSize: '14px',
+              cursor: 'pointer',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 8,
+            }}
+          >
+            🛒 Ver produtos do Shopping
+          </button>
+        </div>
+      )}
+
+    <form onSubmit={handleSubmit} className="space-y-5" style={{ display: bookingConfirmed ? 'none' : undefined }}>
       <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
         <label className="mb-2 block text-sm text-white/70">Seu WhatsApp</label>
 
@@ -375,8 +352,7 @@ export function PublicBookingForm({
               setCustomerName('');
               setServiceId('');
               setProfessionalId('');
-              setDateMode('today');
-              setBookingDate(todayIso);
+              setBookingDate('');
               setStartTime('');
               setTimes([]);
               setLookupMessage('');
@@ -471,84 +447,42 @@ export function PublicBookingForm({
             </select>
           </div>
 
-          <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
-            <label className="mb-3 block text-sm text-white/70">Data</label>
-
-            <div className="grid grid-cols-3 gap-2">
-              <button
-                type="button"
-                className={`btn ${dateMode === 'today' ? 'btn-primary' : 'btn-dark'}`}
-                onClick={() => handleDateModeChange('today')}
-              >
-                Hoje
-              </button>
-
-              <button
-                type="button"
-                className={`btn ${dateMode === 'tomorrow' ? 'btn-primary' : 'btn-dark'}`}
-                onClick={() => handleDateModeChange('tomorrow')}
-              >
-                Amanhã
-              </button>
-
-              <button
-                type="button"
-                className={`btn ${dateMode === 'custom' ? 'btn-primary' : 'btn-dark'}`}
-                onClick={() => handleDateModeChange('custom')}
-              >
-                Escolher data
-              </button>
+          <div className="grid gap-4 md:grid-cols-2">
+            <div>
+              <label className="mb-2 block text-sm text-white/70">Data</label>
+              <input
+                className="field"
+                type="date"
+                value={bookingDate}
+                onChange={(e) => setBookingDate(e.target.value)}
+                required
+              />
             </div>
 
-            <p className="mt-3 text-xs text-white/55">
-              Selecionado: {formatDateModeLabel(dateMode)}
-            </p>
-
-            {dateMode === 'custom' ? (
-              <div className="mt-3">
-                <input
-                  className="field"
-                  type="date"
-                  min={todayIso}
-                  max={maxBookingDate}
-                  value={bookingDate}
-                  onChange={(e) => {
-                    setBookingDate(e.target.value);
-                    setStartTime('');
-                  }}
-                  required
-                />
-              </div>
-            ) : null}
-          </div>
-
-          <div>
-            <label className="mb-2 block text-sm text-white/70">Horário</label>
-            <select
-              className="field"
-              value={startTime}
-              onChange={(e) => setStartTime(e.target.value)}
-              required
-              disabled={!serviceId || !professionalId || !bookingDate || loadingTimes}
-            >
-              <option value="">
-                {loadingTimes
-                  ? 'Carregando horários...'
-                  : times.length
-                    ? 'Escolha o horário'
-                    : 'Nenhum horário disponível'}
-              </option>
-
-              {times.map((time) => (
-                <option key={time} value={time}>
-                  {time}
+            <div>
+              <label className="mb-2 block text-sm text-white/70">Horário</label>
+              <select
+                className="field"
+                value={startTime}
+                onChange={(e) => setStartTime(e.target.value)}
+                required
+                disabled={!serviceId || !professionalId || !bookingDate || loadingTimes}
+              >
+                <option value="">
+                  {loadingTimes
+                    ? 'Carregando horários...'
+                    : times.length
+                      ? 'Escolha o horário'
+                      : 'Nenhum horário disponível'}
                 </option>
-              ))}
-            </select>
 
-            {noTimesMessage ? (
-              <p className="mt-2 text-xs text-amber-200">{noTimesMessage}</p>
-            ) : null}
+                {times.map((time) => (
+                  <option key={time} value={time}>
+                    {time}
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
 
           {selectedService ? (
@@ -558,10 +492,27 @@ export function PublicBookingForm({
           ) : null}
 
           {loyaltyEnabled ? (
-            <div className="rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-white/80">
-              <strong>Cartão fidelidade ativo.</strong>
-              <br />
-              {loyaltyRules || 'Defina as regras no painel admin.'}
+            <div className="rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-white/80" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span style={{ fontSize: 20 }}>🏆</span>
+                <strong>Cartão Fidelidade</strong>
+              </div>
+              {customerVisits !== null && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.8)' }}>
+                    Você tem <strong style={{ color: '#f0c97a' }}>{customerVisits} visita{customerVisits !== 1 ? 's' : ''}</strong> registradas.
+                  </div>
+                  <div style={{ height: 6, background: 'rgba(255,255,255,0.12)', borderRadius: 99, overflow: 'hidden' }}>
+                    <div style={{ height: '100%', width: `${Math.min(100, (customerVisits / 10) * 100)}%`, background: 'linear-gradient(90deg, #c49b63, #f0c97a)', borderRadius: 99, transition: 'width 0.5s' }} />
+                  </div>
+                  <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.5)' }}>
+                    {customerVisits >= 10 ? '🎉 Você atingiu o prêmio!' : `${10 - customerVisits} visita(s) para o próximo prêmio`}
+                  </div>
+                </div>
+              )}
+              <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.55)', borderTop: '1px solid rgba(255,255,255,0.1)', paddingTop: 8 }}>
+                {loyaltyRules || 'Defina as regras no painel admin.'}
+              </div>
             </div>
           ) : null}
 
@@ -573,5 +524,6 @@ export function PublicBookingForm({
 
       {message ? <p className="text-sm text-white/80">{message}</p> : null}
     </form>
+    </>
   );
 }

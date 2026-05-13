@@ -1,4 +1,3 @@
-import { randomUUID } from 'crypto';
 import { NextResponse } from 'next/server';
 import { sendWhatsAppMessage } from '@/lib/whatsapp';
 import { normalizePhone } from '@/lib/phone';
@@ -109,7 +108,6 @@ export async function POST(req: Request) {
           name: customer_name,
           phone: normalizedCustomerWhatsapp,
           whatsapp_number: normalizedCustomerWhatsapp,
-          whatsapp_jid: null,
           total_bookings: 0,
         })
         .select('id')
@@ -175,10 +173,6 @@ export async function POST(req: Request) {
       );
     }
 
-    const cancelToken = randomUUID();
-    const appUrl = process.env.NEXT_PUBLIC_APP_URL || '';
-    const cancelUrl = `${appUrl}/cancelar/${cancelToken}`;
-
     const bookingRes = await supabaseAdmin
       .from('bookings')
       .insert({
@@ -195,9 +189,6 @@ export async function POST(req: Request) {
         price: bookingPrice,
         customer_name,
         customer_whatsapp: normalizedCustomerWhatsapp,
-        customer_jid: null,
-        cancel_confirmation_pending: false,
-        cancel_token: cancelToken,
       })
       .select('*')
       .single();
@@ -216,7 +207,6 @@ export async function POST(req: Request) {
       })
       .eq('id', customerId);
 
-    // Config Evolution do barbeiro (quando ele tem instância própria)
     const barberEvolutionConfig =
       professional.evolution_enabled &&
       professional.evolution_api_url &&
@@ -229,18 +219,9 @@ export async function POST(req: Request) {
           }
         : null;
 
-    // Notificar barbeiro:
-    // - Tem whatsapp_number próprio → envia para ele (config Evolution dele se tiver, senão config global via env)
-    // - Não tem → envia para o número da barbearia (config global via env)
-    const notifyBarberPhone = professional.whatsapp_number
-      ? normalizePhone(professional.whatsapp_number)
-      : null;
-    const notifyShopPhone = barbershop.whatsapp_number
-      ? normalizePhone(barbershop.whatsapp_number)
-      : null;
-    const notifyPhone = notifyBarberPhone || notifyShopPhone;
-    // Quando barbeiro não tem Evolution próprio, passa null para usar vars de ambiente globais
-    const notifyConfig = notifyBarberPhone ? barberEvolutionConfig : null;
+    const notifyPhone = normalizePhone(
+      professional.whatsapp_number || barbershop.whatsapp_number || ''
+    );
 
     if (notifyPhone) {
       try {
@@ -256,7 +237,7 @@ Profissional: ${professional.name}
 Data: ${formatDateBR(booking_date)}
 Hora: ${start_time}
 Nº: ${daily_order_number}`,
-          notifyConfig
+          barberEvolutionConfig
         );
       } catch (error) {
         console.error('Erro ao avisar barbeiro/loja sobre novo agendamento:', error);
@@ -274,21 +255,15 @@ Serviço: ${service.name}
 Profissional: ${professional.name}
 Data: ${formatDateBR(booking_date)}
 Hora: ${start_time}
-Código: ${daily_order_number}
 
-Para cancelar seu agendamento, clique no link abaixo:
-${cancelUrl}`,
+Qualquer dúvida, responda esta mensagem.`,
         barberEvolutionConfig
       );
     } catch (error) {
       console.error('Erro ao enviar confirmação ao cliente:', error);
     }
 
-    if (
-      loyalty?.enabled &&
-      loyalty.visits_required &&
-      customerTotalBookings >= Number(loyalty.visits_required)
-    ) {
+    if (loyalty?.enabled && loyalty.visits_required && customerTotalBookings >= Number(loyalty.visits_required)) {
       try {
         await sendWhatsAppMessage(
           normalizedCustomerWhatsapp,

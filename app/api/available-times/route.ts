@@ -71,9 +71,13 @@ function getCurrentMinutes(timeZone = APP_TIMEZONE) {
   return hour * 60 + minute;
 }
 
+// Buffer de antecedência: mostra só slots que ainda têm tempo suficiente para agendamento
+const BOOKING_ADVANCE_BUFFER_MINUTES = 15;
+
 function getNextSlotMinutes(slot: number, timeZone = APP_TIMEZONE) {
   const nowMinutes = getCurrentMinutes(timeZone);
-  return Math.ceil(nowMinutes / slot) * slot;
+  // floor no slot atual + avançar 1 slot + buffer, evitando que slot suma no exato segundo de virada
+  return Math.floor(nowMinutes / slot) * slot + slot + BOOKING_ADVANCE_BUFFER_MINUTES;
 }
 
 export async function GET(req: Request) {

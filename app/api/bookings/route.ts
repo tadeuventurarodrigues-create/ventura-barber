@@ -216,6 +216,7 @@ export async function POST(req: Request) {
       })
       .eq('id', customerId);
 
+    // Config Evolution do barbeiro (quando ele tem instância própria)
     const barberEvolutionConfig =
       professional.evolution_enabled &&
       professional.evolution_api_url &&
@@ -228,9 +229,18 @@ export async function POST(req: Request) {
           }
         : null;
 
-    const notifyPhone = normalizePhone(
-      professional.whatsapp_number || barbershop.whatsapp_number || ''
-    );
+    // Notificar barbeiro:
+    // - Tem whatsapp_number próprio → envia para ele (config Evolution dele se tiver, senão config global via env)
+    // - Não tem → envia para o número da barbearia (config global via env)
+    const notifyBarberPhone = professional.whatsapp_number
+      ? normalizePhone(professional.whatsapp_number)
+      : null;
+    const notifyShopPhone = barbershop.whatsapp_number
+      ? normalizePhone(barbershop.whatsapp_number)
+      : null;
+    const notifyPhone = notifyBarberPhone || notifyShopPhone;
+    // Quando barbeiro não tem Evolution próprio, passa null para usar vars de ambiente globais
+    const notifyConfig = notifyBarberPhone ? barberEvolutionConfig : null;
 
     if (notifyPhone) {
       try {
@@ -246,7 +256,7 @@ Profissional: ${professional.name}
 Data: ${formatDateBR(booking_date)}
 Hora: ${start_time}
 Nº: ${daily_order_number}`,
-          barberEvolutionConfig
+          notifyConfig
         );
       } catch (error) {
         console.error('Erro ao avisar barbeiro/loja sobre novo agendamento:', error);

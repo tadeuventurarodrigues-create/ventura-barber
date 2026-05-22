@@ -11,6 +11,11 @@ function normalizeEvolutionUrl(value: string) {
   return String(value || '').trim().replace(/\/+$/, '');
 }
 
+type CreatedRecord = {
+  id: string;
+  [key: string]: unknown;
+};
+
 function slugify(value: string) {
   return String(value || '')
     .trim()
@@ -159,8 +164,8 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'Erro ao criar perfil da barbearia.' }, { status: 500 });
     }
 
-    let createdProfessional = null;
-    let createdBarberProfile = null;
+    let createdProfessional: CreatedRecord | null = null;
+    let createdBarberProfile: CreatedRecord | null = null;
 
     if (barber?.name && barber?.email && barber?.password) {
       const barberName = clean(barber.name);
@@ -293,7 +298,7 @@ export async function POST(req: Request) {
       }
     }
 
-    let createdService = null;
+    let createdService: CreatedRecord | null = null;
     if (firstService?.name) {
       const serviceName = clean(firstService.name);
       const servicePrice = Number(firstService.price || 0);

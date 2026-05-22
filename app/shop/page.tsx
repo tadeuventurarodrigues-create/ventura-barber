@@ -4,6 +4,15 @@ import { ShopDashboard } from '@/components/shop-dashboard';
 import { supabaseAdmin } from '@/lib/supabase-admin';
 import { requireShopAccess } from '@/lib/auth';
 
+type CurrentProfessional = {
+  id: string;
+  name: string;
+  description?: string | null;
+  photo_url?: string | null;
+  specialty?: string | null;
+  whatsapp_number?: string | null;
+};
+
 export default async function ShopPage() {
   const profile = await requireShopAccess();
 
@@ -30,7 +39,7 @@ export default async function ShopPage() {
     .order('created_at', { ascending: true });
 
   // Busca dados completos do barbeiro logado (para o novo painel)
-  let currentProfessional = null;
+  let currentProfessional: CurrentProfessional | null = null;
   if (profile.role === 'shop_barber' && profile.professional_id) {
     const { data: profData } = await supabaseAdmin
       .from('professionals')

@@ -163,8 +163,7 @@ async function getBookingsText(professionalId: string, bookingDate: string, titl
 
   return `${title} (${formatDateBR(bookingDate)})
 
-${lines.join('
-')}`;
+${lines.join('\n')}`;
 }
 
 async function findNextBookingByCustomerWhatsapp(phone: string) {

@@ -3,6 +3,27 @@ import { supabaseAdmin } from '@/lib/supabase-admin';
 import { normalizePhone } from '@/lib/phone';
 import { sendWhatsAppMessage } from '@/lib/whatsapp';
 
+type CustomerContact = {
+  name?: string | null;
+  phone?: string | null;
+  whatsapp_number?: string | null;
+};
+
+type BookingService = {
+  name?: string | null;
+  duration_minutes?: number | null;
+};
+
+function getBookingCustomer(booking: any): CustomerContact | null {
+  const customer = booking?.customers;
+  return Array.isArray(customer) ? customer[0] ?? null : customer ?? null;
+}
+
+function getBookingService(booking: any): BookingService | null {
+  const service = booking?.services;
+  return Array.isArray(service) ? service[0] ?? null : service ?? null;
+}
+
 function extractText(payload: any) {
   return (
     payload?.data?.message?.conversation ||
@@ -432,15 +453,17 @@ export async function POST(req: Request) {
         evolutionConfig
       );
 
+      const customer = getBookingCustomer(booking);
+      const bookingService = getBookingService(booking);
       const customerPhone = normalizePhone(
-        booking?.customers?.whatsapp_number || booking?.customers?.phone || booking?.customer_whatsapp || ''
+        customer?.whatsapp_number || customer?.phone || booking?.customer_whatsapp || ''
       );
       if (customerPhone) {
         await sendWhatsAppMessage(
           customerPhone,
-          `Olá, ${booking?.customers?.name || booking?.customer_name || 'cliente'}.
+          `Olá, ${customer?.name || booking?.customer_name || 'cliente'}.
 
-Seu agendamento de ${booking?.services?.name || 'serviço'} em ${formatDateBR(targetDate)} às ${booking.start_time} foi cancelado pela barbearia.
+Seu agendamento de ${bookingService?.name || 'serviço'} em ${formatDateBR(targetDate)} às ${booking.start_time} foi cancelado pela barbearia.
 
 Se quiser, entre em contato para remarcar.`,
           evolutionConfig
@@ -501,7 +524,7 @@ Se quiser, entre em contato para remarcar.`,
         return NextResponse.json({ ok: true, action: 'reschedule-already-cancelled' });
       }
 
-      const service = booking.services;
+      const service = getBookingService(booking);
       if (!service) {
         await sendWhatsAppMessage(senderNumber, 'Serviço do agendamento não encontrado.', evolutionConfig);
         return NextResponse.json({ ok: true, action: 'reschedule-no-service' });
@@ -596,13 +619,14 @@ Para: ${formatDateBR(newDate)} ${newStartTime}`,
         evolutionConfig
       );
 
+      const customer = getBookingCustomer(booking);
       const customerPhone = normalizePhone(
-        booking?.customers?.whatsapp_number || booking?.customers?.phone || booking?.customer_whatsapp || ''
+        customer?.whatsapp_number || customer?.phone || booking?.customer_whatsapp || ''
       );
       if (customerPhone) {
         await sendWhatsAppMessage(
           customerPhone,
-          `Olá, ${booking?.customers?.name || booking?.customer_name || 'cliente'}.
+          `Olá, ${customer?.name || booking?.customer_name || 'cliente'}.
 
 Seu agendamento de ${service.name || 'serviço'} foi remarcado.
 

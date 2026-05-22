@@ -251,7 +251,8 @@ export async function POST(req: Request) {
         return NextResponse.json({ error: 'Erro ao criar primeiro barbeiro.' }, { status: 500 });
       }
 
-      createdProfessional = professionalResult.data;
+      const professional = professionalResult.data as CreatedRecord;
+      createdProfessional = professional;
 
       const profileResult = await supabaseAdmin
         .from('profiles')
@@ -261,13 +262,13 @@ export async function POST(req: Request) {
           name: barberName,
           role: 'shop_barber',
           barbershop_id: barbershop.id,
-          professional_id: createdProfessional.id,
+          professional_id: professional.id,
         })
         .select('*')
         .single();
 
       if (!profileResult.data) {
-        await supabaseAdmin.from('professionals').delete().eq('id', createdProfessional.id);
+        await supabaseAdmin.from('professionals').delete().eq('id', professional.id);
         await supabaseAdmin.auth.admin.deleteUser(authResult.data.user.id);
         return NextResponse.json(
           { error: 'Erro ao criar profile do primeiro barbeiro.' },
@@ -282,7 +283,7 @@ export async function POST(req: Request) {
           .filter((item: any) => item && Number(item.weekday) >= 0 && Number(item.weekday) <= 6)
           .map((item: any) => ({
             barbershop_id: barbershop.id,
-            professional_id: createdProfessional.id,
+            professional_id: professional.id,
             weekday: Number(item.weekday),
             start_time: item.enabled ? clean(item.start_time) || '08:00' : '00:00',
             end_time: item.enabled ? clean(item.end_time) || '18:00' : '00:00',

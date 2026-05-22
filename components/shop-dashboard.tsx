@@ -871,10 +871,10 @@ export function ShopDashboard({
           <div className="w-full max-w-lg rounded-3xl border border-white/10 bg-zinc-950 p-6">
             <h3 className="text-2xl font-bold">Cancelar agendamento</h3>
             <p className="mt-2 text-sm text-white/70">
-              Cliente: {cancelModalBooking.customer_name}
+              Cliente: {cancelModalBooking!.customer_name}
             </p>
             <p className="text-sm text-white/70">
-              Horário: {formatDate(cancelModalBooking.booking_date)} às {cancelModalBooking.start_time}
+              Horário: {formatDate(cancelModalBooking!.booking_date)} às {cancelModalBooking!.start_time}
             </p>
 
             <div className="mt-4">
@@ -902,9 +902,9 @@ export function ShopDashboard({
                 type="button"
                 className="btn btn-danger"
                 onClick={confirmCancelBooking}
-                disabled={loadingBookingId === cancelModalBooking.id}
+                disabled={loadingBookingId === cancelModalBooking!.id}
               >
-                {loadingBookingId === cancelModalBooking.id ? 'Cancelando...' : 'Confirmar cancelamento'}
+                {loadingBookingId === cancelModalBooking!.id ? 'Cancelando...' : 'Confirmar cancelamento'}
               </button>
             </div>
           </div>

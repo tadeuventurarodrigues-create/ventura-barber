@@ -72,6 +72,13 @@ export async function POST(req: Request) {
       updates.end_date = addDaysIso(today, -1);
       updates.blocked_at = new Date().toISOString();
       updates.notes = 'Bloqueado manualmente pelo admin.';
+    } else if (action === 'due_today') {
+      updates.status = 'active';
+      updates.end_date = today;
+      updates.billing_day = Number(today.split('-')[2]);
+      updates.blocked_at = null;
+      updates.trial_ends_at = null;
+      updates.notes = 'Vencimento ajustado para hoje pelo admin para teste.';
     } else if (action === 'cancel') {
       updates.status = 'cancelled';
       updates.blocked_at = new Date().toISOString();

@@ -735,6 +735,7 @@ export function AdminSingleForm({
                 <div className="flex flex-wrap gap-2">
                   <button type="button" className="btn btn-primary" disabled={loadingSection === 'subscription-activate_30_days'} onClick={() => updateSubscription('activate_30_days')}>Liberar 30 dias</button>
                   <button type="button" className="btn btn-dark" disabled={loadingSection === 'subscription-start_trial_30_days'} onClick={() => updateSubscription('start_trial_30_days')}>Iniciar trial</button>
+                  <button type="button" className="btn btn-dark" disabled={loadingSection === 'subscription-due_today'} onClick={() => updateSubscription('due_today')}>Vence hoje</button>
                   <button type="button" className="btn btn-danger" disabled={loadingSection === 'subscription-block'} onClick={() => updateSubscription('block')}>Bloquear</button>
                 </div>
               </div>

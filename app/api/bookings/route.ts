@@ -10,6 +10,7 @@ import {
   toMinutes,
   toTime,
 } from '@/lib/booking-rules';
+import { createBookingCancelUrl } from '@/lib/booking-cancel-token';
 import { normalizePhone } from '@/lib/phone';
 import { supabaseAdmin } from '@/lib/supabase-admin';
 import { sendWhatsAppMessage } from '@/lib/whatsapp';
@@ -319,6 +320,8 @@ No: ${daily_order_number}`,
     }
 
     try {
+      const cancelUrl = createBookingCancelUrl(bookingRes.data.id, req);
+
       await sendWhatsAppMessage(
         normalizedCustomerWhatsapp,
         `Ola, ${customer_name}.
@@ -329,6 +332,9 @@ Servico: ${service.name}
 Profissional: ${professional.name}
 Data: ${formatDateBR(booking_date)}
 Hora: ${start_time}
+
+Para cancelar, acesse:
+${cancelUrl}
 
 Qualquer duvida, responda esta mensagem.`,
         barberEvolutionConfig

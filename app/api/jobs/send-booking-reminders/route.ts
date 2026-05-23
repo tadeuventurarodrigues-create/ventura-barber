@@ -1,21 +1,17 @@
 import { NextResponse } from 'next/server';
+import { createBookingCancelUrl } from '@/lib/booking-cancel-token';
+import { getTodayIso } from '@/lib/booking-rules';
+import { normalizePhone } from '@/lib/phone';
 import { supabaseAdmin } from '@/lib/supabase-admin';
 import { sendWhatsAppMessage } from '@/lib/whatsapp';
-import { normalizePhone } from '@/lib/phone';
+
+type ReminderWindow = '1h' | '10m';
 
 function formatDateBR(value: string) {
   if (!value) return value;
   const [year, month, day] = value.split('-');
   if (!year || !month || !day) return value;
   return `${day}/${month}/${year}`;
-}
-
-function getTodayIso() {
-  const now = new Date();
-  const y = now.getFullYear();
-  const m = String(now.getMonth() + 1).padStart(2, '0');
-  const d = String(now.getDate()).padStart(2, '0');
-  return `${y}-${m}-${d}`;
 }
 
 function combineDateTime(dateStr: string, timeStr: string) {
@@ -51,71 +47,159 @@ function firstItem<T>(value: T | T[] | null | undefined): T | null {
   return value || null;
 }
 
+function isMissingColumnError(error: any) {
+  const message = String(error?.message || '').toLowerCase();
+  return error?.code === '42703' || message.includes('column') || message.includes('schema cache');
+}
+
+async function loadTodayBookings(todayIso: string) {
+  const baseSelect = `
+    id,
+    booking_date,
+    start_time,
+    end_time,
+    status,
+    customer_name,
+    customer_whatsapp,
+    service:services(
+      id,
+      name
+    ),
+    professional:professionals(
+      id,
+      name,
+      whatsapp_number,
+      evolution_enabled,
+      evolution_api_url,
+      evolution_instance,
+      evolution_api_key
+    ),
+    barbershop:barbershops(
+      id,
+      name,
+      whatsapp_number
+    )
+  `;
+
+  const modern = await supabaseAdmin
+    .from('bookings')
+    .select(`
+      ${baseSelect},
+      reminder_sent_at,
+      reminder_1h_sent_at,
+      reminder_10m_sent_at
+    `)
+    .eq('booking_date', todayIso)
+    .eq('status', 'confirmed')
+    .order('start_time', { ascending: true });
+
+  if (!modern.error) {
+    return { bookings: modern.data || [], hasModernReminderColumns: true };
+  }
+
+  if (!isMissingColumnError(modern.error)) {
+    throw new Error(modern.error.message);
+  }
+
+  const legacy = await supabaseAdmin
+    .from('bookings')
+    .select(`
+      ${baseSelect},
+      reminder_sent_at
+    `)
+    .eq('booking_date', todayIso)
+    .eq('status', 'confirmed')
+    .order('start_time', { ascending: true });
+
+  if (legacy.error) {
+    throw new Error(legacy.error.message);
+  }
+
+  return { bookings: legacy.data || [], hasModernReminderColumns: false };
+}
+
+function getReminderWindow(diffMinutes: number): ReminderWindow | null {
+  if (diffMinutes >= 55 && diffMinutes <= 65) return '1h';
+  if (diffMinutes >= 8 && diffMinutes <= 12) return '10m';
+  return null;
+}
+
+function wasReminderSent(booking: any, window: ReminderWindow, hasModernReminderColumns: boolean) {
+  if (window === '1h') {
+    return Boolean(booking.reminder_1h_sent_at || booking.reminder_sent_at);
+  }
+
+  if (!hasModernReminderColumns) {
+    return true;
+  }
+
+  return Boolean(booking.reminder_10m_sent_at);
+}
+
+async function markReminderSent(bookingId: string, window: ReminderWindow, hasModernReminderColumns: boolean) {
+  const now = new Date().toISOString();
+
+  if (!hasModernReminderColumns) {
+    if (window === '1h') {
+      await supabaseAdmin.from('bookings').update({ reminder_sent_at: now }).eq('id', bookingId);
+    }
+    return;
+  }
+
+  const payload =
+    window === '1h'
+      ? { reminder_1h_sent_at: now, reminder_sent_at: now }
+      : { reminder_10m_sent_at: now };
+
+  await supabaseAdmin.from('bookings').update(payload).eq('id', bookingId);
+}
+
+function buildReminderMessage(booking: any, window: ReminderWindow, req: Request) {
+  const service = firstItem(booking.service);
+  const professional = firstItem(booking.professional);
+  const barbershop = firstItem(booking.barbershop);
+  const cancelUrl = createBookingCancelUrl(booking.id, req);
+  const timeText = window === '1h' ? 'Falta 1 hora' : 'Faltam 10 minutos';
+
+  return `${timeText} para seu agendamento em ${barbershop?.name || 'nossa barbearia'}.
+
+Ola, ${booking.customer_name || 'cliente'}.
+
+Servico: ${service?.name || 'Servico'}
+Profissional: ${professional?.name || 'Barbeiro'}
+Data: ${formatDateBR(booking.booking_date)}
+Hora: ${booking.start_time}
+
+Para cancelar, acesse:
+${cancelUrl}
+
+Se for comparecer, pode ignorar esta mensagem.`;
+}
+
 export async function GET(req: Request) {
   try {
     const authHeader = req.headers.get('authorization') || '';
     const expected = `Bearer ${process.env.CRON_SECRET || ''}`;
 
     if (!process.env.CRON_SECRET || authHeader !== expected) {
-      return NextResponse.json({ error: 'Não autorizado.' }, { status: 401 });
+      return NextResponse.json({ error: 'Nao autorizado.' }, { status: 401 });
     }
 
     const todayIso = getTodayIso();
     const now = new Date();
+    const { bookings, hasModernReminderColumns } = await loadTodayBookings(todayIso);
 
-    const { data: bookings, error } = await supabaseAdmin
-      .from('bookings')
-      .select(`
-        id,
-        booking_date,
-        start_time,
-        end_time,
-        status,
-        customer_name,
-        customer_whatsapp,
-        reminder_sent_at,
-        service:services(
-          id,
-          name
-        ),
-        professional:professionals(
-          id,
-          name,
-          whatsapp_number,
-          evolution_enabled,
-          evolution_api_url,
-          evolution_instance,
-          evolution_api_key
-        ),
-        barbershop:barbershops(
-          id,
-          name,
-          whatsapp_number
-        )
-      `)
-      .eq('booking_date', todayIso)
-      .eq('status', 'confirmed')
-      .is('reminder_sent_at', null)
-      .order('start_time', { ascending: true });
-
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
-    }
-
-    let sent = 0;
+    let sent1h = 0;
+    let sent10m = 0;
     let skipped = 0;
     const processedIds: string[] = [];
 
     for (const booking of bookings || []) {
-      const service = firstItem(booking.service);
-      const professional = firstItem(booking.professional);
-      const barbershop = firstItem(booking.barbershop);
-
       const bookingDateTime = combineDateTime(booking.booking_date, booking.start_time);
       const diffMinutes = Math.round((bookingDateTime.getTime() - now.getTime()) / 60000);
+      const window = getReminderWindow(diffMinutes);
 
-      // envia entre 55 e 65 minutos antes
-      if (diffMinutes < 55 || diffMinutes > 65) {
+      if (!window || wasReminderSent(booking, window, hasModernReminderColumns)) {
         skipped++;
         continue;
       }
@@ -127,44 +211,28 @@ export async function GET(req: Request) {
         continue;
       }
 
+      const professional = firstItem(booking.professional);
       const evolutionConfig = getEvolutionConfigFromProfessional(professional);
 
-      const message = `Olá, ${booking.customer_name || 'cliente'}.
-
-Falta 1 hora para seu agendamento em ${barbershop?.name || 'nossa barbearia'}.
-
-Serviço: ${service?.name || 'Serviço'}
-Profissional: ${professional?.name || 'Barbeiro'}
-Data: ${formatDateBR(booking.booking_date)}
-Hora: ${booking.start_time}
-
-Se você deseja cancelar, responda com:
-cancelar
-
-Se for comparecer, pode ignorar esta mensagem.`;
-
       try {
-        await sendWhatsAppMessage(customerPhone, message, evolutionConfig);
-
-        await supabaseAdmin
-          .from('bookings')
-          .update({
-            reminder_sent_at: new Date().toISOString(),
-          })
-          .eq('id', booking.id);
+        await sendWhatsAppMessage(customerPhone, buildReminderMessage(booking, window, req), evolutionConfig);
+        await markReminderSent(booking.id, window, hasModernReminderColumns);
 
         processedIds.push(booking.id);
-        sent++;
+        if (window === '1h') sent1h++;
+        if (window === '10m') sent10m++;
       } catch (err) {
-        console.error('Erro ao enviar lembrete de 1 hora:', err);
+        console.error(`Erro ao enviar lembrete de ${window}:`, err);
       }
     }
 
     return NextResponse.json({
       ok: true,
-      sent,
+      sent1h,
+      sent10m,
       skipped,
       processedIds,
+      modernReminderColumns: hasModernReminderColumns,
     });
   } catch (error) {
     console.error('Erro em /api/jobs/send-booking-reminders:', error);

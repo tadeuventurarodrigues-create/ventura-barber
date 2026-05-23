@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { PublicBookingForm } from '@/components/public-booking-form';
 import { supabaseAdmin } from '@/lib/supabase-admin';
+import { getBarbershopSubscriptionStatus } from '@/lib/subscriptions';
 
 export default async function PublicBarbershopPage({
   params,
@@ -19,6 +20,8 @@ export default async function PublicBarbershopPage({
   if (!shop) {
     notFound();
   }
+
+  const subscription = await getBarbershopSubscriptionStatus(shop.id);
 
   const { data: services } = await supabaseAdmin
     .from('services')
@@ -93,15 +96,22 @@ export default async function PublicBarbershopPage({
           <div id="agendar" className="panel relative z-10 p-6">
             <h2 className="mb-4 text-2xl font-bold">Agendar atendimento</h2>
 
-            <PublicBookingForm
-              barbershopId={shop.id}
-              barbershopName={shop.name}
-              services={services || []}
-              professionals={professionals || []}
-              loyaltyEnabled={Boolean(loyalty?.enabled)}
-              loyaltyRules={loyalty?.rules_text || ''}
-              whatsappNumber={shop.whatsapp_number || null}
-            />
+            {subscription.blocked ? (
+              <div className="rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-white/80">
+                Agenda temporariamente indisponivel. Entre em contato com a barbearia para mais
+                informacoes.
+              </div>
+            ) : (
+              <PublicBookingForm
+                barbershopId={shop.id}
+                barbershopName={shop.name}
+                services={services || []}
+                professionals={professionals || []}
+                loyaltyEnabled={Boolean(loyalty?.enabled)}
+                loyaltyRules={loyalty?.rules_text || ''}
+                whatsappNumber={shop.whatsapp_number || null}
+              />
+            )}
           </div>
         </div>
       </section>

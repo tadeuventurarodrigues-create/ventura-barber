@@ -1,8 +1,10 @@
 import { notFound } from 'next/navigation';
 import { SiteHeader } from '@/components/site-header';
 import { ShopDashboard } from '@/components/shop-dashboard';
+import { SubscriptionAccessBanner } from '@/components/subscription-access-banner';
 import { supabaseAdmin } from '@/lib/supabase-admin';
 import { requireShopAccess } from '@/lib/auth';
+import { getBarbershopSubscriptionStatus } from '@/lib/subscriptions';
 
 type CurrentProfessional = {
   id: string;
@@ -28,6 +30,19 @@ export default async function ShopPage() {
 
   if (!barbershop) {
     notFound();
+  }
+
+  const subscription = await getBarbershopSubscriptionStatus(profile.barbershop_id);
+
+  if (subscription.blocked) {
+    return (
+      <main>
+        <SiteHeader />
+        <section className="mx-auto max-w-3xl px-6 py-10">
+          <SubscriptionAccessBanner subscription={subscription} />
+        </section>
+      </main>
+    );
   }
 
   const isManager = profile.role === 'shop_manager';
@@ -137,6 +152,7 @@ export default async function ShopPage() {
     <main>
       <SiteHeader />
       <section className="mx-auto max-w-7xl px-6 py-10">
+        <SubscriptionAccessBanner subscription={subscription} />
         <ShopDashboard
           profile={fullProfile}
           barbershop={barbershop}

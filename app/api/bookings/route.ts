@@ -13,6 +13,7 @@ import {
 import { createBookingCancelUrl } from '@/lib/booking-cancel-token';
 import { normalizePhone } from '@/lib/phone';
 import { supabaseAdmin } from '@/lib/supabase-admin';
+import { getBarbershopSubscriptionStatus } from '@/lib/subscriptions';
 import { sendWhatsAppMessage } from '@/lib/whatsapp';
 
 function formatDateBR(date: string) {
@@ -119,6 +120,15 @@ export async function POST(req: Request) {
 
     if (barbershop.status && barbershop.status !== 'active') {
       return NextResponse.json({ error: 'Barbearia indisponivel para agendamentos.' }, { status: 403 });
+    }
+
+    const subscription = await getBarbershopSubscriptionStatus(barbershop_id);
+
+    if (subscription.blocked) {
+      return NextResponse.json(
+        { error: 'Agenda temporariamente indisponivel. Entre em contato com a barbearia.' },
+        { status: 403 }
+      );
     }
 
     if (service.barbershop_id !== barbershop_id || !service.is_active) {

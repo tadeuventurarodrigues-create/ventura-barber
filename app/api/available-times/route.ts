@@ -1,48 +1,15 @@
 import { NextResponse } from 'next/server';
+import {
+  ACTIVE_BOOKING_STATUSES,
+  getAllowedDateRange,
+  getWeekdayFromDate,
+  isInsideBreak,
+  isTooCloseToStart,
+  overlapsAny,
+  toMinutes,
+  toTime,
+} from '@/lib/booking-rules';
 import { supabaseAdmin } from '@/lib/supabase-admin';
-
-function toMinutes(time: string) {
-  const [hour, minute] = String(time || '00:00')
-    .split(':')
-    .map(Number);
-  return hour * 60 + minute;
-}
-
-function toTime(totalMinutes: number) {
-  const h = String(Math.floor(totalMinutes / 60)).padStart(2, '0');
-  const m = String(totalMinutes % 60).padStart(2, '0');
-  return `${h}:${m}`;
-}
-
-function getWeekdayFromDate(dateStr: string) {
-  const [year, month, day] = dateStr.split('-').map(Number);
-  const dt = new Date(year, month - 1, day);
-  return dt.getDay();
-}
-
-function getTodayIso() {
-  const now = new Date();
-  const y = now.getFullYear();
-  const m = String(now.getMonth() + 1).padStart(2, '0');
-  const d = String(now.getDate()).padStart(2, '0');
-  return `${y}-${m}-${d}`;
-}
-
-function addDaysIso(baseIso: string, days: number) {
-  const [y, m, d] = baseIso.split('-').map(Number);
-  const dt = new Date(y, m - 1, d);
-  dt.setDate(dt.getDate() + days);
-
-  const yy = dt.getFullYear();
-  const mm = String(dt.getMonth() + 1).padStart(2, '0');
-  const dd = String(dt.getDate()).padStart(2, '0');
-  return `${yy}-${mm}-${dd}`;
-}
-
-function getCurrentMinutes() {
-  const now = new Date();
-  return now.getHours() * 60 + now.getMinutes();
-}
 
 export async function GET(req: Request) {
   try {
@@ -59,8 +26,7 @@ export async function GET(req: Request) {
       );
     }
 
-    const today = getTodayIso();
-    const maxDate = addDaysIso(today, 6);
+    const { today, maxDate } = getAllowedDateRange();
 
     if (bookingDate < today || bookingDate > maxDate) {
       return NextResponse.json({
@@ -101,7 +67,7 @@ export async function GET(req: Request) {
       .select('start_time, end_time, status')
       .eq('professional_id', professionalId)
       .eq('booking_date', bookingDate)
-      .neq('status', 'cancelled');
+      .in('status', ACTIVE_BOOKING_STATUSES);
 
     if (bookingsError) {
       return NextResponse.json({ error: 'Erro ao buscar agendamentos.' }, { status: 500 });
@@ -136,32 +102,20 @@ export async function GET(req: Request) {
     ];
 
     const times: string[] = [];
-    const isToday = bookingDate === today;
-    const currentMinutes = getCurrentMinutes();
-
     for (let current = startMinutes; current + duration <= endMinutes; current += slot) {
       const candidateStart = current;
       const candidateEnd = current + duration;
+      const candidateRange = { start: candidateStart, end: candidateEnd };
 
-      if (isToday && candidateStart < currentMinutes) {
+      if (isTooCloseToStart(bookingDate, candidateStart)) {
         continue;
       }
 
-      const insideBreak =
-        breakStartMinutes !== null &&
-        breakEndMinutes !== null &&
-        candidateStart < breakEndMinutes &&
-        candidateEnd > breakStartMinutes;
-
-      if (insideBreak) {
+      if (isInsideBreak(candidateRange, breakStartMinutes, breakEndMinutes)) {
         continue;
       }
 
-      const hasConflict = occupiedRanges.some((range) => {
-        return candidateStart < range.end && candidateEnd > range.start;
-      });
-
-      if (!hasConflict) {
+      if (!overlapsAny(candidateRange, occupiedRanges)) {
         times.push(toTime(candidateStart));
       }
     }

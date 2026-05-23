@@ -1,24 +1,39 @@
 import { NextResponse } from 'next/server';
-import { sendWhatsAppMessage } from '@/lib/whatsapp';
+import {
+  ACTIVE_BOOKING_STATUSES,
+  getAllowedDateRange,
+  getWeekdayFromDate,
+  isAlignedToSlot,
+  isInsideBreak,
+  isTooCloseToStart,
+  overlapsAny,
+  toMinutes,
+  toTime,
+} from '@/lib/booking-rules';
 import { normalizePhone } from '@/lib/phone';
 import { supabaseAdmin } from '@/lib/supabase-admin';
-
-function toMinutes(time: string) {
-  const [hour, minute] = String(time || '00:00')
-    .split(':')
-    .map(Number);
-  return hour * 60 + minute;
-}
-
-function toTime(totalMinutes: number) {
-  const h = String(Math.floor(totalMinutes / 60)).padStart(2, '0');
-  const m = String(totalMinutes % 60).padStart(2, '0');
-  return `${h}:${m}`;
-}
+import { sendWhatsAppMessage } from '@/lib/whatsapp';
 
 function formatDateBR(date: string) {
   const [year, month, day] = date.split('-');
   return `${day}/${month}/${year}`;
+}
+
+function getEvolutionConfigFromProfessional(professional: any) {
+  if (
+    professional?.evolution_enabled &&
+    professional?.evolution_api_url &&
+    professional?.evolution_instance &&
+    professional?.evolution_api_key
+  ) {
+    return {
+      apiUrl: professional.evolution_api_url,
+      instance: professional.evolution_instance,
+      apiKey: professional.evolution_api_key,
+    };
+  }
+
+  return null;
 }
 
 export async function POST(req: Request) {
@@ -44,50 +59,126 @@ export async function POST(req: Request) {
       !booking_date ||
       !start_time
     ) {
-      return NextResponse.json({ error: 'Dados obrigatórios faltando.' }, { status: 400 });
+      return NextResponse.json({ error: 'Dados obrigatorios faltando.' }, { status: 400 });
     }
 
     const normalizedCustomerWhatsapp = normalizePhone(customer_whatsapp);
 
     if (!normalizedCustomerWhatsapp || normalizedCustomerWhatsapp.length < 12) {
-      return NextResponse.json({ error: 'WhatsApp do cliente inválido.' }, { status: 400 });
+      return NextResponse.json({ error: 'WhatsApp do cliente invalido.' }, { status: 400 });
     }
 
-    const { data: service } = await supabaseAdmin
-      .from('services')
-      .select('id, name, duration_minutes, price')
-      .eq('id', service_id)
-      .single();
+    const { today, maxDate } = getAllowedDateRange();
 
-    const { data: professional } = await supabaseAdmin
-      .from('professionals')
-      .select(`
-        id,
-        name,
-        barbershop_id,
-        whatsapp_number,
-        evolution_enabled,
-        evolution_api_url,
-        evolution_instance,
-        evolution_api_key
-      `)
-      .eq('id', professional_id)
-      .single();
+    if (booking_date < today || booking_date > maxDate) {
+      return NextResponse.json(
+        { error: `A data permitida deve estar entre ${today} e ${maxDate}.` },
+        { status: 400 }
+      );
+    }
 
-    const { data: barbershop } = await supabaseAdmin
-      .from('barbershops')
-      .select('id, name, whatsapp_number')
-      .eq('id', barbershop_id)
-      .single();
-
-    const { data: loyalty } = await supabaseAdmin
-      .from('loyalty_settings')
-      .select('*')
-      .eq('barbershop_id', barbershop_id)
-      .maybeSingle();
+    const [{ data: service }, { data: professional }, { data: barbershop }, { data: loyalty }] =
+      await Promise.all([
+        supabaseAdmin
+          .from('services')
+          .select('id, barbershop_id, name, duration_minutes, price, is_active')
+          .eq('id', service_id)
+          .single(),
+        supabaseAdmin
+          .from('professionals')
+          .select(`
+            id,
+            name,
+            barbershop_id,
+            whatsapp_number,
+            is_active,
+            accepts_booking,
+            evolution_enabled,
+            evolution_api_url,
+            evolution_instance,
+            evolution_api_key
+          `)
+          .eq('id', professional_id)
+          .single(),
+        supabaseAdmin
+          .from('barbershops')
+          .select('id, name, whatsapp_number, status')
+          .eq('id', barbershop_id)
+          .single(),
+        supabaseAdmin
+          .from('loyalty_settings')
+          .select('*')
+          .eq('barbershop_id', barbershop_id)
+          .maybeSingle(),
+      ]);
 
     if (!service || !professional || !barbershop) {
-      return NextResponse.json({ error: 'Dados da barbearia não encontrados.' }, { status: 404 });
+      return NextResponse.json({ error: 'Dados da barbearia nao encontrados.' }, { status: 404 });
+    }
+
+    if (barbershop.status && barbershop.status !== 'active') {
+      return NextResponse.json({ error: 'Barbearia indisponivel para agendamentos.' }, { status: 403 });
+    }
+
+    if (service.barbershop_id !== barbershop_id || !service.is_active) {
+      return NextResponse.json({ error: 'Servico indisponivel para agendamento.' }, { status: 400 });
+    }
+
+    if (
+      professional.barbershop_id !== barbershop_id ||
+      professional.is_active === false ||
+      professional.accepts_booking === false
+    ) {
+      return NextResponse.json({ error: 'Profissional indisponivel para agendamento.' }, { status: 400 });
+    }
+
+    const serviceDuration = Number(service.duration_minutes || 30);
+    const bookingStartMinutes = toMinutes(start_time);
+    const bookingEndMinutes = bookingStartMinutes + serviceDuration;
+    const end_time = toTime(bookingEndMinutes);
+    const bookingPrice = Number(service.price || 0);
+
+    if (isTooCloseToStart(booking_date, bookingStartMinutes)) {
+      return NextResponse.json(
+        { error: 'Esse horario nao esta mais disponivel.' },
+        { status: 409 }
+      );
+    }
+
+    const weekday = getWeekdayFromDate(booking_date);
+    const { data: workingHour, error: workingHourError } = await supabaseAdmin
+      .from('working_hours')
+      .select('start_time, end_time, break_start_time, break_end_time, slot_interval_minutes, is_active')
+      .eq('professional_id', professional_id)
+      .eq('weekday', weekday)
+      .maybeSingle();
+
+    if (workingHourError) {
+      return NextResponse.json({ error: 'Erro ao validar horario de trabalho.' }, { status: 500 });
+    }
+
+    if (!workingHour || workingHour.is_active === false) {
+      return NextResponse.json({ error: 'Profissional nao atende nessa data.' }, { status: 400 });
+    }
+
+    const workingStart = toMinutes(workingHour.start_time);
+    const workingEnd = toMinutes(workingHour.end_time);
+    const slotMinutes = Number(workingHour.slot_interval_minutes || 30);
+    const candidateRange = { start: bookingStartMinutes, end: bookingEndMinutes };
+
+    if (bookingStartMinutes < workingStart || bookingEndMinutes > workingEnd) {
+      return NextResponse.json({ error: 'Horario fora do expediente.' }, { status: 400 });
+    }
+
+    if (!isAlignedToSlot(bookingStartMinutes, workingStart, slotMinutes)) {
+      return NextResponse.json({ error: 'Horario indisponivel para agendamento.' }, { status: 400 });
+    }
+
+    const breakStart = workingHour.break_start_time ? toMinutes(workingHour.break_start_time) : null;
+    const breakEnd = workingHour.break_end_time ? toMinutes(workingHour.break_end_time) : null;
+
+    if (isInsideBreak(candidateRange, breakStart, breakEnd)) {
+      return NextResponse.json({ error: 'Horario indisponivel no intervalo do profissional.' }, { status: 400 });
     }
 
     const customerRes = await supabaseAdmin
@@ -120,36 +211,22 @@ export async function POST(req: Request) {
       customerId = insertCustomer.data.id;
     }
 
-    const serviceDuration = Number(service.duration_minutes || 30);
-    const bookingStartMinutes = toMinutes(start_time);
-    const bookingEndMinutes = bookingStartMinutes + serviceDuration;
-    const end_time = toTime(bookingEndMinutes);
-    const bookingPrice = Number(service.price || 0);
-
-    const sameDay = await supabaseAdmin
-      .from('bookings')
-      .select('daily_order_number')
-      .eq('barbershop_id', barbershop_id)
-      .eq('booking_date', booking_date)
-      .order('daily_order_number', { ascending: false })
-      .limit(1);
-
-    const daily_order_number = sameDay.data?.length
-      ? Number(sameDay.data[0].daily_order_number) + 1
-      : 1;
-
     const conflicts = await supabaseAdmin
       .from('bookings')
       .select('id, start_time, end_time')
       .eq('professional_id', professional_id)
       .eq('booking_date', booking_date)
-      .in('status', ['pending', 'confirmed']);
+      .in('status', ACTIVE_BOOKING_STATUSES);
 
     const blocks = await supabaseAdmin
       .from('time_blocks')
       .select('id, start_time, end_time')
       .eq('professional_id', professional_id)
       .eq('block_date', booking_date);
+
+    if (conflicts.error || blocks.error) {
+      return NextResponse.json({ error: 'Erro ao validar disponibilidade.' }, { status: 500 });
+    }
 
     const existingRanges = [
       ...(conflicts.data || []).map((item: any) => ({
@@ -162,16 +239,24 @@ export async function POST(req: Request) {
       })),
     ];
 
-    const overlap = existingRanges.some((range) => {
-      return bookingStartMinutes < range.end && bookingEndMinutes > range.start;
-    });
-
-    if (overlap) {
+    if (overlapsAny(candidateRange, existingRanges)) {
       return NextResponse.json(
-        { error: 'Esse horário já está ocupado ou bloqueado.' },
+        { error: 'Esse horario ja esta ocupado ou bloqueado.' },
         { status: 409 }
       );
     }
+
+    const sameDay = await supabaseAdmin
+      .from('bookings')
+      .select('daily_order_number')
+      .eq('barbershop_id', barbershop_id)
+      .eq('booking_date', booking_date)
+      .order('daily_order_number', { ascending: false })
+      .limit(1);
+
+    const daily_order_number = sameDay.data?.length
+      ? Number(sameDay.data[0].daily_order_number) + 1
+      : 1;
 
     const bookingRes = await supabaseAdmin
       .from('bookings')
@@ -207,18 +292,7 @@ export async function POST(req: Request) {
       })
       .eq('id', customerId);
 
-    const barberEvolutionConfig =
-      professional.evolution_enabled &&
-      professional.evolution_api_url &&
-      professional.evolution_instance &&
-      professional.evolution_api_key
-        ? {
-            apiUrl: professional.evolution_api_url,
-            instance: professional.evolution_instance,
-            apiKey: professional.evolution_api_key,
-          }
-        : null;
-
+    const barberEvolutionConfig = getEvolutionConfigFromProfessional(professional);
     const notifyPhone = normalizePhone(
       professional.whatsapp_number || barbershop.whatsapp_number || ''
     );
@@ -227,16 +301,16 @@ export async function POST(req: Request) {
       try {
         await sendWhatsAppMessage(
           notifyPhone,
-          `📅 Novo agendamento
+          `Novo agendamento
 
 Barbearia: ${barbershop.name}
 Cliente: ${customer_name}
 WhatsApp: ${normalizedCustomerWhatsapp}
-Serviço: ${service.name}
+Servico: ${service.name}
 Profissional: ${professional.name}
 Data: ${formatDateBR(booking_date)}
 Hora: ${start_time}
-Nº: ${daily_order_number}`,
+No: ${daily_order_number}`,
           barberEvolutionConfig
         );
       } catch (error) {
@@ -247,20 +321,20 @@ Nº: ${daily_order_number}`,
     try {
       await sendWhatsAppMessage(
         normalizedCustomerWhatsapp,
-        `Olá, ${customer_name}.
+        `Ola, ${customer_name}.
 
 Seu agendamento em ${barbershop.name} foi confirmado.
 
-Serviço: ${service.name}
+Servico: ${service.name}
 Profissional: ${professional.name}
 Data: ${formatDateBR(booking_date)}
 Hora: ${start_time}
 
-Qualquer dúvida, responda esta mensagem.`,
+Qualquer duvida, responda esta mensagem.`,
         barberEvolutionConfig
       );
     } catch (error) {
-      console.error('Erro ao enviar confirmação ao cliente:', error);
+      console.error('Erro ao enviar confirmacao ao cliente:', error);
     }
 
     if (loyalty?.enabled && loyalty.visits_required && customerTotalBookings >= Number(loyalty.visits_required)) {
@@ -268,7 +342,7 @@ Qualquer dúvida, responda esta mensagem.`,
         await sendWhatsAppMessage(
           normalizedCustomerWhatsapp,
           loyalty.reward_message ||
-            `Parabéns! Você alcançou a meta do cartão fidelidade e ganhou ${loyalty.reward_label || 'um prêmio'}.`,
+            `Parabens! Voce alcancou a meta do cartao fidelidade e ganhou ${loyalty.reward_label || 'um premio'}.`,
           barberEvolutionConfig
         );
       } catch (error) {

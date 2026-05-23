@@ -73,6 +73,8 @@ export async function getBarbershopSubscriptionStatus(
   if (blocked) {
     message =
       'Seu sistema esta bloqueado. Regularize o pagamento para voltar a acessar agenda, clientes e recursos pendentes.';
+  } else if (daysUntilDue === 0) {
+    message = 'Seu gestor de agendamentos vence hoje.';
   } else if (daysUntilDue !== null && daysUntilDue <= 5) {
     message = `Seu gestor de agendamentos vence em ${daysUntilDue} dia${daysUntilDue === 1 ? '' : 's'}.`;
   }
@@ -261,4 +263,30 @@ export async function markSubscriptionPaid(input: {
   }
 
   return updated.data;
+}
+
+export async function syncOverdueSubscriptions() {
+  const today = todayIso();
+  const now = new Date().toISOString();
+
+  const overdue = await supabaseAdmin
+    .from('subscriptions')
+    .update({
+      status: 'overdue',
+      blocked_at: now,
+      notes: 'Bloqueado automaticamente por vencimento.',
+    })
+    .in('status', ['active', 'trial'])
+    .lt('end_date', today)
+    .select('id, barbershop_id, end_date');
+
+  if (overdue.error) {
+    throw new Error(overdue.error.message);
+  }
+
+  return {
+    today,
+    blockedCount: overdue.data?.length || 0,
+    blockedSubscriptions: overdue.data || [],
+  };
 }

@@ -1,4 +1,5 @@
 import type { SubscriptionAccessStatus } from '@/lib/subscriptions';
+import { SubscriptionPixButton } from '@/components/subscription-pix-button';
 
 type Props = {
   subscription: SubscriptionAccessStatus;
@@ -25,9 +26,7 @@ export function SubscriptionAccessBanner({ subscription }: Props) {
           ) : null}
         </div>
 
-        <button type="button" className="btn btn-primary" disabled>
-          Pagar agora com Pix
-        </button>
+        <SubscriptionPixButton />
       </div>
     </div>
   );

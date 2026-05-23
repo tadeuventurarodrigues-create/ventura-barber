@@ -193,3 +193,72 @@ export async function ensureBarbershopSubscription(
 
   return created.data.id as string;
 }
+
+export async function getSubscriptionForBarbershop(barbershopId: string) {
+  await ensureBarbershopSubscription(barbershopId);
+
+  const { data, error } = await supabaseAdmin
+    .from('subscriptions')
+    .select('*')
+    .eq('barbershop_id', barbershopId)
+    .single();
+
+  if (error || !data) {
+    throw new Error(error?.message || 'Assinatura nao encontrada.');
+  }
+
+  return data;
+}
+
+export function getNextSubscriptionEndDate(currentEndDate?: string | null) {
+  const current = todayIso();
+  const base = currentEndDate && currentEndDate > current ? currentEndDate : current;
+  return addDaysIso(base, 30);
+}
+
+export async function markSubscriptionPaid(input: {
+  barbershopId: string;
+  subscriptionId?: string | null;
+  paymentId?: string | null;
+  amount?: number | null;
+}) {
+  const subscription = input.subscriptionId
+    ? (
+        await supabaseAdmin
+          .from('subscriptions')
+          .select('*')
+          .eq('id', input.subscriptionId)
+          .single()
+      ).data
+    : await getSubscriptionForBarbershop(input.barbershopId);
+
+  if (!subscription) {
+    throw new Error('Assinatura nao encontrada.');
+  }
+
+  const nextEndDate = getNextSubscriptionEndDate(subscription.end_date);
+
+  const updated = await supabaseAdmin
+    .from('subscriptions')
+    .update({
+      status: 'active',
+      end_date: nextEndDate,
+      billing_day: Number(nextEndDate.split('-')[2]),
+      amount_monthly: input.amount || subscription.amount_monthly || 30,
+      last_payment_at: new Date().toISOString(),
+      blocked_at: null,
+      trial_ends_at: null,
+      notes: input.paymentId
+        ? `Pagamento Mercado Pago aprovado: ${input.paymentId}`
+        : 'Pagamento aprovado.',
+    })
+    .eq('id', subscription.id)
+    .select('*')
+    .single();
+
+  if (updated.error || !updated.data) {
+    throw new Error(updated.error?.message || 'Erro ao liberar assinatura.');
+  }
+
+  return updated.data;
+}

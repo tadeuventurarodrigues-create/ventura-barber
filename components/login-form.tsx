@@ -4,7 +4,15 @@ import { useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 
-export function LoginForm() {
+const ADMIN_SECRET_PATH = '/09fjf889n3bvy9332';
+
+type LoginMode = 'shop' | 'admin';
+
+type Props = {
+  mode?: LoginMode;
+};
+
+export function LoginForm({ mode = 'shop' }: Props) {
   const router = useRouter();
   const searchParams = useSearchParams();
 
@@ -25,21 +33,53 @@ export function LoginForm() {
       password,
     });
 
-    setLoading(false);
-
     if (error) {
-      setMessage(error.message || 'Não foi possível entrar.');
+      setLoading(false);
+      setMessage(error.message || 'Nao foi possivel entrar.');
+      return;
+    }
+
+    const { data: profile, error: profileError } = await supabase
+      .from('profiles')
+      .select('role')
+      .single();
+
+    if (profileError || !profile) {
+      await supabase.auth.signOut();
+      setLoading(false);
+      setMessage('Conta sem perfil de acesso configurado.');
+      return;
+    }
+
+    if (mode === 'shop' && profile.role === 'admin') {
+      await supabase.auth.signOut();
+      setLoading(false);
+      setMessage('Administradores devem acessar somente pelo link secreto.');
+      return;
+    }
+
+    if (mode === 'admin' && profile.role !== 'admin') {
+      await supabase.auth.signOut();
+      setLoading(false);
+      setMessage('Este login e exclusivo para administradores.');
       return;
     }
 
     const next = searchParams.get('next');
-    if (next) {
+    const canUseNext =
+      mode === 'admin'
+        ? Boolean(next?.startsWith(ADMIN_SECRET_PATH))
+        : Boolean(next?.startsWith('/shop'));
+
+    setLoading(false);
+
+    if (next && canUseNext) {
       router.push(next);
       router.refresh();
       return;
     }
 
-    router.push('/auth/redirect');
+    router.push(mode === 'admin' ? ADMIN_SECRET_PATH : '/shop');
     router.refresh();
   }
 
@@ -48,7 +88,9 @@ export function LoginForm() {
       <div>
         <h1 className="text-2xl font-bold">Entrar no Ventura Barber</h1>
         <p className="mt-2 text-sm text-white/70">
-          Use seu email e senha para acessar o painel.
+          {mode === 'admin'
+            ? 'Acesso exclusivo do administrador do sistema.'
+            : 'Use seu email e senha para acessar o painel da barbearia.'}
         </p>
       </div>
 

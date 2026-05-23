@@ -25,8 +25,8 @@ export async function middleware(request: NextRequest) {
   );
 
   const pathname = request.nextUrl.pathname;
-  const isProtectedRoute =
-    pathname.startsWith('/admin') || pathname.startsWith('/shop');
+  const adminSecretPath = '/09fjf889n3bvy9332';
+  const isProtectedRoute = pathname.startsWith('/shop');
 
   if (!isProtectedRoute) {
     return response;
@@ -55,9 +55,9 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(url);
   }
 
-  if (pathname.startsWith('/admin') && profile.role !== 'admin') {
+  if (profile.role === 'admin' && pathname.startsWith('/shop')) {
     const url = request.nextUrl.clone();
-    url.pathname = '/shop';
+    url.pathname = adminSecretPath;
     return NextResponse.redirect(url);
   }
 
@@ -67,7 +67,7 @@ export async function middleware(request: NextRequest) {
     profile.role !== 'shop_barber'
   ) {
     const url = request.nextUrl.clone();
-    url.pathname = '/admin';
+    url.pathname = '/unauthorized';
     return NextResponse.redirect(url);
   }
 
@@ -75,5 +75,5 @@ export async function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ['/admin/:path*', '/shop/:path*'],
+  matcher: ['/shop/:path*'],
 };

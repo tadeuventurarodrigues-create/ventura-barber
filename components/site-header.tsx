@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { getCurrentProfile } from '@/lib/auth';
+import { ADMIN_SECRET_PATH, getCurrentProfile } from '@/lib/auth';
 import { supabaseAdmin } from '@/lib/supabase-admin';
 import { AuthButtons } from '@/components/auth-buttons';
 
@@ -23,7 +23,7 @@ export async function SiteHeader() {
   }
 
   if (profile?.role === 'admin') {
-    panelLink = '/admin';
+    panelLink = ADMIN_SECRET_PATH;
     panelLabel = 'Admin';
   }
 

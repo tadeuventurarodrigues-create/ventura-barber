@@ -3,6 +3,8 @@ import { createClient } from '@/lib/supabase/server';
 
 export type AppRole = 'admin' | 'shop_manager' | 'shop_barber';
 
+export const ADMIN_SECRET_PATH = '/09fjf889n3bvy9332';
+
 export type AppProfile = {
   id: string;
   email: string;
@@ -42,7 +44,7 @@ export async function getCurrentProfile(): Promise<AppProfile | null> {
 }
 
 export function getRedirectPathForProfile(profile: AppProfile) {
-  if (profile.role === 'admin') return '/admin';
+  if (profile.role === 'admin') return ADMIN_SECRET_PATH;
   return '/shop';
 }
 

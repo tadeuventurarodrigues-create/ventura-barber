@@ -80,6 +80,19 @@ type ProfessionalService = {
   custom_duration_minutes?: number | null;
 };
 
+type Subscription = {
+  id: string;
+  barbershop_id: string;
+  status: 'active' | 'trial' | 'overdue' | 'cancelled';
+  end_date?: string | null;
+  billing_day?: number | null;
+  amount_monthly?: number | null;
+  trial_ends_at?: string | null;
+  last_payment_at?: string | null;
+  blocked_at?: string | null;
+  notes?: string | null;
+};
+
 type ShopForm = {
   name: string;
   slug: string;
@@ -222,6 +235,7 @@ export function AdminSingleForm({
   initialLoyaltySettings,
   initialWorkingHours,
   initialProfessionalServices,
+  initialSubscriptions,
 }: {
   initialBarbershops: Barbershop[];
   initialProfiles: Profile[];
@@ -230,6 +244,7 @@ export function AdminSingleForm({
   initialLoyaltySettings: Loyalty[];
   initialWorkingHours: WorkingHour[];
   initialProfessionalServices: ProfessionalService[];
+  initialSubscriptions?: Subscription[];
 }) {
   const [barbershops, setBarbershops] = useState((initialBarbershops || []).filter(Boolean));
   const [profiles, setProfiles] = useState((initialProfiles || []).filter(Boolean));
@@ -238,6 +253,7 @@ export function AdminSingleForm({
   const [loyaltySettings, setLoyaltySettings] = useState((initialLoyaltySettings || []).filter(Boolean));
   const [workingHours] = useState((initialWorkingHours || []).filter(Boolean));
   const [professionalServices, setProfessionalServices] = useState((initialProfessionalServices || []).filter(Boolean));
+  const [subscriptions, setSubscriptions] = useState((initialSubscriptions || []).filter(Boolean));
 
   const [selectedShopId, setSelectedShopId] = useState<string | null>(initialBarbershops?.[0]?.id || null);
   const [createMode, setCreateMode] = useState((initialBarbershops || []).length === 0);
@@ -259,6 +275,10 @@ export function AdminSingleForm({
     if (!selectedShop) return null;
     return (loyaltySettings || []).find((item) => item?.barbershop_id === selectedShop.id) || null;
   }, [loyaltySettings, selectedShop]);
+  const currentSubscription = useMemo(() => {
+    if (!selectedShop) return null;
+    return (subscriptions || []).find((item) => item?.barbershop_id === selectedShop.id) || null;
+  }, [subscriptions, selectedShop]);
   const currentProfessionals = useMemo(() => {
     if (!selectedShop) return [];
     return (professionals || []).filter((item) => item?.barbershop_id === selectedShop.id);
@@ -406,6 +426,40 @@ export function AdminSingleForm({
 
   function getBarberProfile(professionalId: string) {
     return profiles.find((item) => item.professional_id === professionalId) || null;
+  }
+
+  async function updateSubscription(action: string) {
+    if (!selectedShop) return;
+
+    setMessage('');
+    setLoadingSection(`subscription-${action}`);
+
+    try {
+      const res = await fetch('/api/admin/subscriptions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          barbershop_id: selectedShop.id,
+          action,
+        }),
+      });
+      const data = await res.json();
+
+      if (!res.ok) {
+        setMessage(data.error || 'Erro ao atualizar assinatura.');
+        return;
+      }
+
+      setSubscriptions((prev) => {
+        const next = (prev || []).filter((item) => item.barbershop_id !== selectedShop.id);
+        return [...next, data.subscription].filter(Boolean);
+      });
+      setMessage('Assinatura atualizada com sucesso.');
+    } catch {
+      setMessage('Erro ao atualizar assinatura.');
+    } finally {
+      setLoadingSection(null);
+    }
   }
 
   function editBarber(professional: Professional) {
@@ -661,6 +715,31 @@ export function AdminSingleForm({
             </div>
             {selectedShop && !createMode ? <a href={`/${selectedShop.slug}`} target="_blank" rel="noreferrer" className="btn btn-dark">Abrir site da loja</a> : null}
           </div>
+
+          {!createMode && selectedShop ? (
+            <div className="mb-6 rounded-2xl border border-white/10 bg-black/20 p-4">
+              <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                <div>
+                  <h2 className="text-lg font-semibold">Assinatura</h2>
+                  <p className="mt-1 text-sm text-white/70">
+                    Status: {currentSubscription?.status || 'sem registro'} · Vencimento:{' '}
+                    {currentSubscription?.end_date
+                      ? currentSubscription.end_date.split('-').reverse().join('/')
+                      : 'nao definido'}{' '}
+                    · Valor: R$ {Number(currentSubscription?.amount_monthly || 30).toFixed(2)}
+                  </p>
+                  {currentSubscription?.notes ? (
+                    <p className="mt-1 text-xs text-white/50">{currentSubscription.notes}</p>
+                  ) : null}
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <button type="button" className="btn btn-primary" disabled={loadingSection === 'subscription-activate_30_days'} onClick={() => updateSubscription('activate_30_days')}>Liberar 30 dias</button>
+                  <button type="button" className="btn btn-dark" disabled={loadingSection === 'subscription-start_trial_30_days'} onClick={() => updateSubscription('start_trial_30_days')}>Iniciar trial</button>
+                  <button type="button" className="btn btn-danger" disabled={loadingSection === 'subscription-block'} onClick={() => updateSubscription('block')}>Bloquear</button>
+                </div>
+              </div>
+            </div>
+          ) : null}
 
           <div className="grid gap-8 xl:grid-cols-2">
             <div className="space-y-4">

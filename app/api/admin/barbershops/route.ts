@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { getCurrentProfile } from '@/lib/auth';
 import { supabaseAdmin } from '@/lib/supabase-admin';
 import { normalizePhone } from '@/lib/phone';
+import { ensureBarbershopSubscription } from '@/lib/subscriptions';
 
 function normalizeEmail(value: string) {
   return String(value || '').trim().toLowerCase();
@@ -114,6 +115,12 @@ export async function PUT(req: Request) {
         { error: shopUpdate.error?.message || 'Erro ao atualizar barbearia.' },
         { status: 500 }
       );
+    }
+
+    try {
+      await ensureBarbershopSubscription(body.id);
+    } catch (error) {
+      console.error('Erro ao garantir assinatura da barbearia:', error);
     }
 
     let managerProfileId = manager.profile_id || null;

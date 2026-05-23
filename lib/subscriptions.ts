@@ -88,3 +88,108 @@ export async function getBarbershopSubscriptionStatus(
     message,
   };
 }
+
+function addDaysIso(baseIso: string, days: number) {
+  const [y, m, d] = baseIso.split('-').map(Number);
+  const dt = new Date(y, m - 1, d);
+  dt.setDate(dt.getDate() + days);
+  const yy = dt.getFullYear();
+  const mm = String(dt.getMonth() + 1).padStart(2, '0');
+  const dd = String(dt.getDate()).padStart(2, '0');
+  return `${yy}-${mm}-${dd}`;
+}
+
+function nextBillingDay30() {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = now.getMonth();
+  const day = now.getDate();
+  const due = day <= 30 ? new Date(year, month, 30) : new Date(year, month + 1, 30);
+  const yy = due.getFullYear();
+  const mm = String(due.getMonth() + 1).padStart(2, '0');
+  const dd = String(due.getDate()).padStart(2, '0');
+  return `${yy}-${mm}-${dd}`;
+}
+
+export async function getOrCreateMonthlyPlanId() {
+  const existing = await supabaseAdmin
+    .from('plans')
+    .select('id')
+    .eq('slug', 'ventura-barber-mensal-30')
+    .maybeSingle();
+
+  if (existing.data?.id) {
+    return existing.data.id as string;
+  }
+
+  const created = await supabaseAdmin
+    .from('plans')
+    .insert({
+      name: 'Ventura Barber Mensal',
+      slug: 'ventura-barber-mensal-30',
+      price_monthly: 30,
+      max_professionals: 20,
+      max_users: 20,
+      whatsapp_enabled: true,
+      commands_enabled: true,
+      reports_enabled: true,
+      custom_branding_enabled: true,
+    })
+    .select('id')
+    .single();
+
+  if (created.error || !created.data?.id) {
+    throw new Error(created.error?.message || 'Erro ao criar plano mensal.');
+  }
+
+  return created.data.id as string;
+}
+
+export async function ensureBarbershopSubscription(
+  barbershopId: string,
+  options?: {
+    existingPaidClient?: boolean;
+    notes?: string;
+  }
+) {
+  const current = await supabaseAdmin
+    .from('subscriptions')
+    .select('id')
+    .eq('barbershop_id', barbershopId)
+    .maybeSingle();
+
+  if (current.data?.id) {
+    return current.data.id as string;
+  }
+
+  const planId = await getOrCreateMonthlyPlanId();
+  const startDate = todayIso();
+  const isPaid = Boolean(options?.existingPaidClient);
+  const endDate = isPaid ? nextBillingDay30() : addDaysIso(startDate, 30);
+
+  const created = await supabaseAdmin
+    .from('subscriptions')
+    .insert({
+      barbershop_id: barbershopId,
+      plan_id: planId,
+      status: isPaid ? 'active' : 'trial',
+      start_date: startDate,
+      end_date: endDate,
+      billing_day: isPaid ? 30 : Number(endDate.split('-')[2]),
+      amount_monthly: 30,
+      trial_ends_at: isPaid ? null : endDate,
+      notes:
+        options?.notes ||
+        (isPaid
+          ? 'Migrado como cliente ativo/pagante. Nao iniciar trial gratis.'
+          : 'Assinatura criada automaticamente com 30 dias gratis.'),
+    })
+    .select('id')
+    .single();
+
+  if (created.error || !created.data?.id) {
+    throw new Error(created.error?.message || 'Erro ao criar assinatura.');
+  }
+
+  return created.data.id as string;
+}

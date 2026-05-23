@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase-admin';
 import { getCurrentProfile } from '@/lib/auth';
 import { normalizePhone } from '@/lib/phone';
+import { ensureBarbershopSubscription } from '@/lib/subscriptions';
 
 function clean(value: FormDataEntryValue | string | null | undefined) {
   return String(value || '').trim();
@@ -128,6 +129,14 @@ export async function POST(req: Request) {
     }
 
     const barbershop = shopResult.data;
+
+    try {
+      await ensureBarbershopSubscription(barbershop.id);
+    } catch (error) {
+      await supabaseAdmin.from('barbershops').delete().eq('id', barbershop.id);
+      console.error('Erro ao criar assinatura inicial:', error);
+      return NextResponse.json({ error: 'Erro ao criar assinatura inicial da barbearia.' }, { status: 500 });
+    }
 
     const managerEmail = clean(manager.email).toLowerCase();
     const managerAuth = await supabaseAdmin.auth.admin.createUser({

@@ -10,6 +10,7 @@ export async function AdminPanel() {
     loyaltyRes,
     workingHoursRes,
     professionalServicesRes,
+    subscriptionsRes,
   ] = await Promise.all([
     supabaseAdmin.from('barbershops').select('*').order('created_at', { ascending: false }),
     supabaseAdmin
@@ -32,6 +33,10 @@ export async function AdminPanel() {
     supabaseAdmin
       .from('professional_services')
       .select('id, professional_id, service_id, custom_price, custom_duration_minutes'),
+    supabaseAdmin
+      .from('subscriptions')
+      .select('id, barbershop_id, status, end_date, billing_day, amount_monthly, trial_ends_at, last_payment_at, blocked_at, notes')
+      .order('end_date', { ascending: true }),
   ]);
 
   return (
@@ -43,6 +48,7 @@ export async function AdminPanel() {
       initialLoyaltySettings={loyaltyRes.data || []}
       initialWorkingHours={workingHoursRes.data || []}
       initialProfessionalServices={professionalServicesRes.data || []}
+      initialSubscriptions={subscriptionsRes.data || []}
     />
   );
 }
